@@ -1,56 +1,130 @@
 # DormDish Mobile
 
-A mobile-first React + Vite frontend prototype based on the existing DormDish project. It is designed to run locally in VS Code and intentionally uses local demo data only. No PHP API, database, login service, or real payment integration is called.
-
-## Run in VS Code
-
-1. Install Node.js LTS if it is not installed.
-2. Extract this folder and open `DormDishMobile` in VS Code.
-3. Open the integrated terminal in this folder.
-4. Run `npm install`.
-5. Run `npm run dev`.
-6. Open the local URL Vite prints, usually `http://localhost:5173`.
-
-To test on a phone connected to the same Wi-Fi, run `npm run dev -- --host 0.0.0.0` and open the Network URL printed by Vite on your phone.
-
-## Included frontend flows
-
-- Home dashboard and featured meals
-- Menu search, category filters, and price sorting
-- Product detail modal, quantity selection, and favorites
-- Cart drawer and local demo checkout
-- Local demo order history and reorder action
-- Editable profile name and campus location
-- Light/dark theme toggle on larger screens
-- Responsive desktop, tablet, and mobile layouts with mobile bottom navigation
-- Cart, favorites, orders, and profile details saved to browser localStorage
-
-## Before backend integration
-
-All menu data and order behavior are mock frontend state. Prices and item availability are sample data. Connect the UI to the PHP API and database later; the checkout explicitly tells the user it is a local demo and does not process payments or contact a canteen.
-
+DormDish is a React, Vite, Capacitor, Express, and SQLite school-project demo. It runs locally without a hosted database, paid map API, real payment provider, or real GPS tracking. The web interface and Android app use the same local API.
 
 ## Project structure
 
 ```text
-src/
-    App.jsx
-    main.jsx
-    styles.css
-    data/
-        menu.js
-    components/
-        CartDrawer.jsx
-        CheckoutModal.jsx
-        Navigation.jsx
-        ProductCard.jsx
-        ProductModal.jsx
-    pages/
-        FavoritesPage.jsx
-        HomePage.jsx
-        MenuPage.jsx
-        OrdersPage.jsx
-        ProfilePage.jsx
+DormDishMobile/
+    src/
+        App.jsx
+        lib/api.js
+        components/LoginPage.jsx
+        pages/customer/
+        pages/manager/ManagerDashboard.jsx
+        pages/admin/AdminDashboard.jsx
+        pages/rider/RiderDashboard.jsx
+        styles.css
+        role-styles.css
+        enhancements.css
+    server/
+        index.js
+        auth.js
+        database.js
+        data/
+    scripts/reset-database.js
+    tests/api.test.js
+    android/
 ```
 
-The app shell and shared state live in `App.jsx`. Each main page is in its own file, reusable UI is in `components/`, and sample menu data is in `data/menu.js`. JavaScript and JSX files use four-space indentation.
+The API routes enforce role permissions on the server, not only in the UI. SQLite creates its tables and sample records automatically when the API starts for the first time. The local database file is `server/data/dormdish.sqlite` and is ignored by Git.
+
+## Requirements
+
+- Node.js 22 LTS or newer with npm
+- Internet access for the first `npm install` so npm can fetch dependencies
+- Android Studio only if you want to launch the native Android project
+
+## Run on Windows
+
+1. Open the `DormDishMobile` root folder in VS Code.
+2. Copy `.env.example` to `.env` in PowerShell:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+3. Open `.env` and replace `JWT_SECRET` with a long random value. Leave `VITE_API_URL` blank for the desktop web app. The example value is only suitable for local classroom development.
+4. Install dependencies:
+
+   ```powershell
+   npm install
+   ```
+
+   Use `npm install` for this first setup rather than `npm ci`; the lockfile from the original frontend prototype needs to be regenerated to include the added local API dependencies. Commit the updated `package-lock.json` after installation succeeds.
+
+5. Start the full development workflow:
+
+   ```powershell
+   npm run dev
+   ```
+
+   This starts the SQLite API and Vite server, then attempts to launch DormDish in the first configured Android emulator using Capacitor's live development server. Keep the terminal open while debugging.
+
+6. The browser preview remains available at `http://localhost:5173`, and the API health endpoint is `http://localhost:4000/api/health`.
+
+The app in the Android emulator uses `http://10.0.2.2:5173` for live React changes and `http://10.0.2.2:4000/api` for local API requests. The normal `capacitor.config.json` remains pointed at the built web assets; `capacitor.config.dev.json` is only used by the development launcher. The API listens on `0.0.0.0:4000`. For browser-only work, run `npm run dev:web`.
+
+## Seeded test accounts
+
+All accounts use hashed passwords in SQLite. These are local classroom credentials, not production credentials.
+
+| Role | Email | Password | Assigned store |
+|---|---|---|---|
+| Super Admin | `superadmin@dormdish.test` | `Admin123!` | System-wide |
+| Store Manager 1 | `manager.alpha@dormdish.test` | `Manager123!` | Store Alpha |
+| Store Manager 2 | `manager.beta@dormdish.test` | `Manager123!` | Store Beta |
+| Store Manager 3 | `manager.gamma@dormdish.test` | `Manager123!` | Store Gamma |
+| Customer | `customer@dormdish.test` | `Customer123!` | Customer account |
+| Delivery Rider | `rider@dormdish.test` | `Rider123!` | Store Alpha |
+
+The sign-in page includes buttons to autofill each demo account.
+
+## Implemented permissions and flows
+
+- Super Admin manages accounts, store registrations and manager assignments, delivery rider associations through user management, general settings, and rating visibility. Order APIs explicitly deny Super Admin access, and the product write APIs deny Super Admin access.
+- Store Managers only manage products, orders, ratings, riders, and tracking for their assigned store. Product create, edit, and delete endpoints only allow Store Managers.
+- Customers browse active stores ordered by database-calculated average rating, browse store products, order available stock, view their order history, follow ETA and tracking events, and rate a store after delivery.
+- Riders only see orders assigned to their rider account for their assigned store. They can update simulated location/note information and mark an active delivery delivered.
+- Order placement and cancellation update stock in SQLite. Orders retain item snapshots so historic order information remains readable.
+- Store location links open Google Maps externally. Order confirmation, order history, and rider deliveries include a Store-to-delivery route link. Google Maps calculates the driving distance and travel time for the entered destination; no paid Maps API or fake GPS is used. Store Alpha uses the provided Maps link.
+- ETA and tracking are estimates manually controlled by the Store Manager or permitted rider action. There is no GPS tracking or guarantee that an ETA is exact.
+- Payments are demo-only and no money is processed.
+
+## Android emulator debugging
+
+Install Android Studio, Android SDK Platform-Tools, and create at least one Android Virtual Device in Device Manager. You can leave the emulator stopped: `npm run dev` attempts to start the first configured AVD automatically. If automatic launch is not available, start the emulator manually and run `npm run dev:android` in a second terminal while the API and Vite server remain running.
+
+To use an emulator with the already-running API and Vite server, run `npm run dev:android` in a second terminal. To run only the website and API in the browser, run `npm run dev:web`. The mobile app uses a dedicated Capacitor development config pointing to Vite over `10.0.2.2`, while `http://localhost:5173` remains available on the development computer.
+
+For a production-style packaged build instead of the live development server, run `npm run build`, `npx cap sync android`, and `npx cap open android`, then launch it from Android Studio. The development manifest allows cleartext HTTP for the local classroom API. Do not use that configuration for a public production deployment. Capacitor 8 uses newer Android build tools, so use an Android Studio version compatible with the AGP/Gradle versions configured in the project.
+
+For a physical phone, set `VITE_API_URL` in `.env` to the computer's LAN IP, for example `http://192.168.1.20:4000/api`, then rebuild and sync the Android app. The phone and computer must be on the same Wi-Fi, and the computer firewall must allow the local API port.
+
+## Tests
+
+Run the API integration checks after `npm install` and after copying `.env.example` to `.env` for normal development:
+
+```powershell
+npm test
+```
+
+The tests launch an isolated API process with a temporary SQLite database and check seeded ratings, role restrictions, manager product scope, authentication, order progress, ETA, tracking persistence, rider access, and customer ratings. The test database is deleted at the end.
+
+## Reset sample data
+
+Stop the development server first, then run:
+
+```powershell
+npm run db:reset
+npm run dev
+```
+
+The reset command deletes the default local SQLite database files. The next API startup recreates the schema, accounts, stores, sample products, sample ratings, and demo delivery. It does not reset browser-local favorites or a saved cart; clear the browser's site data if you also want to reset those.
+
+## Operational notes
+
+- The SQLite database is local to the machine running the API. The Android app does not contain its own SQLite file; it sends API requests to the development computer.
+- The default store names, ratings, products, prices, and customer addresses are demo records and can be edited through the provided manager/admin screens.
+- `VITE_API_URL` can be left blank for Vite web development and Android emulator use. Vite proxies `/api` to the local API while developing on desktop.
+- The original frontend-only demo screens have been replaced by role-specific data-backed screens. Browser storage is still used only for cart, favorites, theme preference, and the customer's usual delivery address.

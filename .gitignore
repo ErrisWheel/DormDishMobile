@@ -7,3 +7,6 @@ android/.gradle/
 android/build/
 android/app/build/
 .DS_Store
+server/data/*.sqlite
+server/data/*.sqlite-shm
+server/data/*.sqlite-wal
