@@ -3,7 +3,16 @@ import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
-import { db, getOrderDetails, getProduct, getStoreRatingSummary, initializeDatabase } from './database.js';
+import {
+    calculateOrderDiscounts,
+    db,
+    getOrderDetails,
+    getProduct,
+    getStoreRatingSummary,
+    initializeDatabase,
+    withEffectiveProductPricing
+} from './database.js';
+import { registerGroupOrderRoutes } from './group-orders.js';
 import { allowRoles, createToken, requireAuth } from './auth.js';
 
 initializeDatabase();
@@ -25,10 +34,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 
 function cleanUser(user) {
-    if (!user) {
-        return user;
-    }
-
+    if (!user) return user;
     const { password_hash, ...safeUser } = user;
     return safeUser;
 }
@@ -46,39 +52,35 @@ function getStoreById(id) {
 }
 
 function requireStoreManagerOfOrder(req, res, order) {
-    if (req.user.role === 'store_manager' && order.store_id === userStoreId(req.user)) {
-        return true;
-    }
-
+    if (req.user.role === 'store_manager' && order.store_id === userStoreId(req.user)) return true;
     res.status(403).json({ error: 'You can only manage orders from your assigned store.' });
     return false;
 }
 
 function canViewOrder(user, order) {
     if (user.role === 'customer') {
-        return order.customer_id === user.id;
+        return order.customer_id === user.id || Boolean(
+            order.group_order_id &&
+            db.prepare('SELECT 1 FROM group_order_members WHERE group_order_id = ? AND customer_id = ?')
+                .get(order.group_order_id, user.id)
+        );
     }
 
-    if (user.role === 'store_manager') {
-        return order.store_id === userStoreId(user);
-    }
-
-    if (user.role === 'rider') {
-        return order.rider_id === user.id && order.store_id === userStoreId(user);
-    }
-
+    if (user.role === 'store_manager') return order.store_id === userStoreId(user);
+    if (user.role === 'rider') return order.rider_id === user.id && order.store_id === userStoreId(user);
     return false;
 }
 
 function parseProductPayload(body, partial = false) {
     const values = {};
-    const allowed = ['name', 'description', 'category', 'price', 'oldPrice', 'imageUrl', 'stock', 'isAvailable'];
+    const allowed = [
+        'name', 'description', 'category', 'price', 'oldPrice',
+        'imageUrl', 'stock', 'isAvailable', 'promoPrice', 'promoLabel',
+        'promoStartsAt', 'promoEndsAt', 'isPromoted'
+    ];
 
     for (const field of allowed) {
-        if (partial && !Object.hasOwn(body, field)) {
-            continue;
-        }
-
+        if (partial && !Object.hasOwn(body, field)) continue;
         values[field] = body[field];
     }
 
@@ -120,6 +122,50 @@ function parseProductPayload(body, partial = false) {
 
     if (!partial || Object.hasOwn(body, 'isAvailable')) {
         values.isAvailable = values.isAvailable === undefined ? true : Boolean(values.isAvailable);
+    }
+
+    if (!partial || Object.hasOwn(body, 'promoPrice')) {
+        values.promoPrice = values.promoPrice === '' || values.promoPrice === null || values.promoPrice === undefined
+            ? null
+            : Number(values.promoPrice);
+        if (values.promoPrice !== null && (!Number.isFinite(values.promoPrice) || values.promoPrice < 0)) {
+            throw new Error('Enter a valid promotional price.');
+        }
+    }
+
+    if (!partial || Object.hasOwn(body, 'promoLabel')) {
+        values.promoLabel = typeof values.promoLabel === 'string' ? values.promoLabel.trim().slice(0, 80) : '';
+    }
+
+    for (const field of ['promoStartsAt', 'promoEndsAt']) {
+        if (!partial || Object.hasOwn(body, field)) {
+            const raw = values[field];
+            if (raw === '' || raw === null || raw === undefined) {
+                values[field] = null;
+            } else {
+                const parsed = Date.parse(raw);
+                if (!Number.isFinite(parsed)) {
+                    throw new Error('Enter a valid promotional start/end date.');
+                }
+                values[field] = new Date(parsed).toISOString();
+            }
+        }
+    }
+
+    if (!partial || Object.hasOwn(body, 'isPromoted')) {
+        values.isPromoted = values.isPromoted === undefined ? values.promoPrice !== null : Boolean(values.isPromoted);
+    }
+
+    if (values.isPromoted && values.promoPrice === null) {
+        throw new Error('Enter a promotional price or disable the promotion.');
+    }
+
+    if (values.promoPrice !== null && values.price !== undefined && values.promoPrice >= values.price) {
+        throw new Error('Promotional price must be lower than the regular price.');
+    }
+
+    if (values.promoStartsAt && values.promoEndsAt && Date.parse(values.promoStartsAt) >= Date.parse(values.promoEndsAt)) {
+        throw new Error('Promotion end time must be after its start time.');
     }
 
     return values;
@@ -170,7 +216,15 @@ app.patch('/api/auth/profile', requireAuth, allowRoles('customer'), (req, res) =
 });
 
 app.get('/api/settings/public', (req, res) => {
-    const rows = db.prepare("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('delivery_fee', 'default_eta_minutes', 'campus_location')").all();
+    const rows = db.prepare(`
+        SELECT setting_key, setting_value FROM app_settings
+        WHERE setting_key IN (
+            'delivery_fee', 'default_eta_minutes', 'campus_location',
+            'student_discount_percent', 'group_discount_percent',
+            'group_discount_min_members', 'group_discount_min_subtotal'
+        )
+    `).all();
+
     res.json({ settings: Object.fromEntries(rows.map((row) => [row.setting_key, row.setting_value])) });
 });
 
@@ -186,6 +240,7 @@ app.get('/api/stores', (req, res) => {
         GROUP BY s.id
         ORDER BY COALESCE(AVG(r.score), 0) DESC, s.name COLLATE NOCASE ASC
     `).all();
+
     res.json({ stores });
 });
 
@@ -197,26 +252,31 @@ app.get('/api/stores/:id/products', (req, res) => {
     }
 
     const products = db.prepare(`
-        SELECT p.*, s.name AS store_name
+        SELECT p.*, s.name AS store_name,
+               (SELECT COALESCE(SUM(oi.quantity), 0)
+                FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                WHERE oi.product_id = p.id AND o.status <> 'Cancelled') AS sold_count
         FROM products p JOIN stores s ON s.id = p.store_id
         WHERE p.store_id = ? AND p.is_available = 1 AND s.is_active = 1
         ORDER BY p.name COLLATE NOCASE
-    `).all(store.id);
+    `).all(store.id).map(withEffectiveProductPricing);
 
     res.json({ store, products });
 });
 
 app.get('/api/products', (req, res) => {
     const storeId = req.query.storeId ? Number(req.query.storeId) : null;
-    const where = storeId
-        ? 'WHERE p.store_id = ? AND s.is_active = 1'
-        : 'WHERE s.is_active = 1';
+    const where = storeId ? 'WHERE p.store_id = ? AND s.is_active = 1' : 'WHERE s.is_active = 1';
+
     const products = db.prepare(`
-        SELECT p.*, s.name AS store_name
+        SELECT p.*, s.name AS store_name,
+               (SELECT COALESCE(SUM(oi.quantity), 0)
+                FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                WHERE oi.product_id = p.id AND o.status <> 'Cancelled') AS sold_count
         FROM products p JOIN stores s ON s.id = p.store_id
         ${where}
         ORDER BY p.store_id, p.name COLLATE NOCASE
-    `).all(...(storeId ? [storeId] : []));
+    `).all(...(storeId ? [storeId] : [])).map(withEffectiveProductPricing);
 
     res.json({ products });
 });
@@ -231,11 +291,17 @@ app.post('/api/products', requireAuth, allowRoles('store_manager'), (req, res) =
     }
 
     const result = db.prepare(`
-        INSERT INTO products (store_id, name, description, category, price, old_price, image_url, stock, is_available, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (
+            store_id, name, description, category, price, old_price, promo_price,
+            promo_label, promo_starts_at, promo_ends_at, is_promoted,
+            image_url, stock, is_available, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         userStoreId(req.user), values.name, values.description, values.category || 'Meals',
-        values.price, values.oldPrice, values.imageUrl || '/images/hero-food.png', values.stock,
+        values.price, values.oldPrice, values.promoPrice, values.promoLabel || '',
+        values.promoStartsAt, values.promoEndsAt, values.isPromoted ? 1 : 0,
+        values.imageUrl || '/images/hero-food.png', values.stock,
         values.isAvailable ? 1 : 0, new Date().toISOString()
     );
 
@@ -263,9 +329,16 @@ app.put('/api/products/:id', requireAuth, allowRoles('store_manager'), (req, res
 
     db.prepare(`
         UPDATE products
-        SET name = ?, description = ?, category = ?, price = ?, old_price = ?, image_url = ?, stock = ?, is_available = ?
+        SET name = ?, description = ?, category = ?, price = ?, old_price = ?,
+            promo_price = ?, promo_label = ?, promo_starts_at = ?, promo_ends_at = ?,
+            is_promoted = ?, image_url = ?, stock = ?, is_available = ?
         WHERE id = ?
-    `).run(values.name, values.description, values.category || 'Meals', values.price, values.oldPrice, values.imageUrl || '/images/hero-food.png', values.stock, values.isAvailable ? 1 : 0, product.id);
+    `).run(
+        values.name, values.description, values.category || 'Meals', values.price, values.oldPrice,
+        values.promoPrice, values.promoLabel || '', values.promoStartsAt, values.promoEndsAt,
+        values.isPromoted ? 1 : 0, values.imageUrl || '/images/hero-food.png',
+        values.stock, values.isAvailable ? 1 : 0, product.id
+    );
 
     res.json({ product: getProduct(product.id) });
 });
@@ -294,8 +367,17 @@ app.get('/api/orders', requireAuth, (req, res) => {
     let parameters = [];
 
     if (req.user.role === 'customer') {
-        query = 'SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at DESC';
-        parameters = [req.user.id];
+        query = `
+            SELECT id FROM orders
+            WHERE customer_id = ?
+               OR group_order_id IN (
+                    SELECT gm.group_order_id
+                    FROM group_order_members gm
+                    WHERE gm.customer_id = ?
+               )
+            ORDER BY created_at DESC
+        `;
+        parameters = [req.user.id, req.user.id];
     } else if (req.user.role === 'store_manager') {
         query = 'SELECT id FROM orders WHERE store_id = ? ORDER BY created_at DESC';
         parameters = [userStoreId(req.user)];
@@ -304,12 +386,26 @@ app.get('/api/orders', requireAuth, (req, res) => {
         parameters = [req.user.id, userStoreId(req.user)];
     }
 
-    const orders = db.prepare(query).all(...parameters).map(({ id }) => getOrderDetails(id));
+    const orders = db.prepare(query).all(...parameters).map(({ id }) => {
+        const order = getOrderDetails(id);
+
+        if (req.user.role === 'customer') {
+            order.rating = db.prepare(`
+                SELECT id, score, review, created_at FROM ratings
+                WHERE order_id = ? AND customer_id = ? AND is_visible = 1
+            `).get(id, req.user.id) || null;
+            order.can_rate = Number(order.customer_id) === Number(req.user.id);
+        }
+
+        return order;
+    });
+
     res.json({ orders });
 });
 
 app.post('/api/orders', requireAuth, allowRoles('customer'), (req, res) => {
-    const { storeId, items, deliveryAddress, paymentMethod } = req.body;
+    const { storeId, items, deliveryAddress, paymentMethod, orderNotes } = req.body;
+    const cleanOrderNotes = typeof orderNotes === 'string' ? orderNotes.trim().slice(0, 500) : '';
     const numericStoreId = Number(storeId);
     const store = getStoreById(numericStoreId);
 
@@ -338,10 +434,8 @@ app.post('/api/orders', requireAuth, allowRoles('customer'), (req, res) => {
         groupedItems.set(productId, (groupedItems.get(productId) || 0) + quantity);
     }
 
-    const deliveryFee = Number(db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'delivery_fee'").get()?.setting_value || 20);
     const createOrder = db.transaction(() => {
         const selectedProducts = [];
-        let subtotal = 0;
 
         for (const [productId, quantity] of groupedItems) {
             const product = getProduct(productId);
@@ -354,30 +448,51 @@ app.post('/api/orders', requireAuth, allowRoles('customer'), (req, res) => {
                 throw new Error(`${product.name} does not have enough stock for this quantity.`);
             }
 
-            subtotal += product.price * quantity;
             selectedProducts.push({ product, quantity });
         }
 
-        const rider = db.prepare("SELECT id FROM users WHERE role = 'rider' AND store_id = ? AND is_active = 1 ORDER BY id LIMIT 1").get(numericStoreId);
+        const pricing = calculateOrderDiscounts(
+            selectedProducts.map(({ product, quantity }) => ({ product, quantity }))
+        );
+
+        const deliveryFee = pricing.policy.deliveryFee;
+        const total = Math.max(0, pricing.subtotal - pricing.discountTotal) + deliveryFee;
+        const rider = db.prepare(`
+            SELECT id FROM users
+            WHERE role = 'rider' AND store_id = ? AND is_active = 1
+            ORDER BY id LIMIT 1
+        `).get(numericStoreId);
+
         const orderId = `DD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
         const now = new Date().toISOString();
 
         db.prepare(`
-            INSERT INTO orders (id, customer_id, store_id, rider_id, status, subtotal, delivery_fee, total, payment_method, delivery_address, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?)
-        `).run(orderId, req.user.id, numericStoreId, rider?.id || null, subtotal, deliveryFee, subtotal + deliveryFee, typeof paymentMethod === 'string' && paymentMethod.trim() ? paymentMethod.trim() : 'Cash on delivery', deliveryAddress.trim(), now, now);
+            INSERT INTO orders (
+                id, customer_id, store_id, rider_id, status, subtotal, delivery_fee,
+                total, discount_total, student_discount, group_discount, group_order_id,
+                payment_method, delivery_address, order_notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+        `).run(
+            orderId, req.user.id, numericStoreId, rider?.id || null,
+            pricing.subtotal, deliveryFee, total, pricing.discountTotal,
+            pricing.studentDiscount, pricing.groupDiscount,
+            typeof paymentMethod === 'string' && paymentMethod.trim() ? paymentMethod.trim() : 'Cash on delivery',
+            deliveryAddress.trim(), cleanOrderNotes, now, now
+        );
 
         const insertItem = db.prepare(`
-            INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity, line_total)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO order_items (
+                order_id, product_id, product_name, unit_price, quantity, line_total, ordered_by_customer_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         const decrementStock = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?');
 
         for (const { product, quantity } of selectedProducts) {
-            insertItem.run(orderId, product.id, product.name, product.price, quantity, product.price * quantity);
-            const changed = decrementStock.run(quantity, product.id, quantity).changes;
+            insertItem.run(orderId, product.id, product.name, product.price, quantity, product.price * quantity, req.user.id);
 
-            if (changed !== 1) {
+            if (decrementStock.run(quantity, product.id, quantity).changes !== 1) {
                 throw new Error(`${product.name} has just run out of stock. Refresh and try again.`);
             }
         }
@@ -407,6 +522,14 @@ app.get('/api/orders/:id', requireAuth, (req, res) => {
 
     if (!canViewOrder(req.user, order)) {
         return res.status(403).json({ error: 'You do not have access to this order.' });
+    }
+
+    if (req.user.role === 'customer') {
+        order.rating = db.prepare(`
+            SELECT id, score, review, created_at FROM ratings
+            WHERE order_id = ? AND customer_id = ? AND is_visible = 1
+        `).get(order.id, req.user.id) || null;
+        order.can_rate = Number(order.customer_id) === Number(req.user.id);
     }
 
     res.json({ order });
@@ -477,9 +600,7 @@ app.patch('/api/orders/:id/progress', requireAuth, allowRoles('store_manager', '
             const restoreStock = db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
 
             for (const item of items) {
-                if (item.product_id !== null) {
-                    restoreStock.run(item.quantity, item.product_id);
-                }
+                if (item.product_id !== null) restoreStock.run(item.quantity, item.product_id);
             }
         }
 
@@ -491,7 +612,15 @@ app.patch('/api/orders/:id/progress', requireAuth, allowRoles('store_manager', '
             Delivered: 'Your delivery has been marked complete.',
             Cancelled: 'The order was cancelled.'
         };
-        logTracking(order.id, req.user.id, status, typeof note === 'string' && note.trim() ? note.trim() : defaultNotes[status] || 'Order progress updated.', typeof locationLabel === 'string' ? locationLabel.trim() : '', etaAt);
+
+        logTracking(
+            order.id,
+            req.user.id,
+            status,
+            typeof note === 'string' && note.trim() ? note.trim() : defaultNotes[status] || 'Order progress updated.',
+            typeof locationLabel === 'string' ? locationLabel.trim() : '',
+            etaAt
+        );
     });
 
     try {
@@ -509,28 +638,31 @@ app.patch('/api/orders/:id/assign-rider', requireAuth, allowRoles('store_manager
         return res.status(404).json({ error: 'Order not found.' });
     }
 
-    if (!requireStoreManagerOfOrder(req, res, order)) {
-        return;
-    }
+    if (!requireStoreManagerOfOrder(req, res, order)) return;
 
     const riderId = req.body.riderId === null || req.body.riderId === '' ? null : Number(req.body.riderId);
     let rider = null;
 
     if (riderId !== null) {
-        rider = db.prepare("SELECT id, name, store_id FROM users WHERE id = ? AND role = 'rider' AND is_active = 1").get(riderId);
+        rider = db.prepare(`
+            SELECT id, name, store_id FROM users
+            WHERE id = ? AND role = 'rider' AND is_active = 1
+        `).get(riderId);
 
         if (!rider || rider.store_id !== order.store_id) {
             return res.status(400).json({ error: 'Choose an active rider assigned to your store.' });
         }
     }
 
-    db.prepare('UPDATE orders SET rider_id = ?, updated_at = ? WHERE id = ?').run(riderId, new Date().toISOString(), order.id);
+    db.prepare('UPDATE orders SET rider_id = ?, updated_at = ? WHERE id = ?')
+        .run(riderId, new Date().toISOString(), order.id);
     logTracking(order.id, req.user.id, order.status, rider ? `Assigned to ${rider.name}.` : 'Rider assignment removed.', '', order.eta_at);
     res.json({ order: getOrderDetails(order.id) });
 });
 
 app.post('/api/orders/:id/ratings', requireAuth, allowRoles('customer'), (req, res) => {
-    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND customer_id = ?').get(req.params.id, req.user.id);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND customer_id = ?')
+        .get(req.params.id, req.user.id);
 
     if (!order) {
         return res.status(404).json({ error: 'Order not found.' });
@@ -547,10 +679,12 @@ app.post('/api/orders/:id/ratings', requireAuth, allowRoles('customer'), (req, r
         return res.status(400).json({ error: 'Choose a rating from 1 to 5.' });
     }
 
-    const existing = db.prepare('SELECT id FROM ratings WHERE order_id = ? AND customer_id = ?').get(order.id, req.user.id);
+    const existing = db.prepare('SELECT id FROM ratings WHERE order_id = ? AND customer_id = ?')
+        .get(order.id, req.user.id);
 
     if (existing) {
-        db.prepare('UPDATE ratings SET score = ?, review = ?, created_at = ? WHERE id = ?').run(score, review, new Date().toISOString(), existing.id);
+        db.prepare('UPDATE ratings SET score = ?, review = ?, created_at = ? WHERE id = ?')
+            .run(score, review, new Date().toISOString(), existing.id);
         return res.json({ success: true });
     }
 
@@ -563,7 +697,13 @@ app.post('/api/orders/:id/ratings', requireAuth, allowRoles('customer'), (req, r
 });
 
 app.get('/api/manager/riders', requireAuth, allowRoles('store_manager'), (req, res) => {
-    const riders = db.prepare("SELECT id, name, email, store_id FROM users WHERE role = 'rider' AND store_id = ? AND is_active = 1 ORDER BY name").all(userStoreId(req.user));
+    const riders = db.prepare(`
+        SELECT id, name, email, store_id
+        FROM users
+        WHERE role = 'rider' AND store_id = ? AND is_active = 1
+        ORDER BY name
+    `).all(userStoreId(req.user));
+
     res.json({ riders });
 });
 
@@ -574,6 +714,7 @@ app.get('/api/manager/ratings', requireAuth, allowRoles('store_manager'), (req, 
         WHERE store_id = ? AND is_visible = 1
         ORDER BY created_at DESC, id DESC
     `).all(userStoreId(req.user));
+
     res.json({ ratings, summary: getStoreRatingSummary(userStoreId(req.user)) });
 });
 
@@ -581,8 +722,14 @@ app.get('/api/admin/users', requireAuth, allowRoles('superadmin'), (req, res) =>
     const users = db.prepare(`
         SELECT id, name, email, role, store_id, is_active, created_at
         FROM users
-        ORDER BY CASE role WHEN 'superadmin' THEN 0 WHEN 'store_manager' THEN 1 WHEN 'rider' THEN 2 ELSE 3 END, name
+        ORDER BY CASE role
+            WHEN 'superadmin' THEN 0
+            WHEN 'store_manager' THEN 1
+            WHEN 'rider' THEN 2
+            ELSE 3
+        END, name
     `).all();
+
     res.json({ users });
 });
 
@@ -609,7 +756,10 @@ app.post('/api/admin/users', requireAuth, allowRoles('superadmin'), (req, res) =
             INSERT INTO users (name, email, password_hash, role, store_id, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
         `).run(cleanName, cleanEmail, bcrypt.hashSync(password, 10), role, role === 'store_manager' || role === 'rider' ? store_id : null, new Date().toISOString());
-        const user = db.prepare('SELECT id, name, email, role, store_id, is_active, created_at FROM users WHERE id = ?').get(result.lastInsertRowid);
+
+        const user = db.prepare('SELECT id, name, email, role, store_id, is_active, created_at FROM users WHERE id = ?')
+            .get(result.lastInsertRowid);
+
         res.status(201).json({ user });
     } catch (error) {
         if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -651,14 +801,19 @@ app.patch('/api/admin/users/:id', requireAuth, allowRoles('superadmin'), (req, r
     try {
         const updateUser = db.transaction(() => {
             if (role === 'store_manager' && storeId !== null) {
-                db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND store_id = ? AND id != ?").run(storeId, user.id);
+                db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND store_id = ? AND id != ?")
+                    .run(storeId, user.id);
             }
 
             db.prepare('UPDATE users SET name = ?, email = ?, role = ?, store_id = ?, is_active = ? WHERE id = ?')
                 .run(name, email, role, role === 'store_manager' || role === 'rider' ? storeId : null, isActive ? 1 : 0, user.id);
         });
+
         updateUser();
-        const updated = db.prepare('SELECT id, name, email, role, store_id, is_active, created_at FROM users WHERE id = ?').get(user.id);
+
+        const updated = db.prepare('SELECT id, name, email, role, store_id, is_active, created_at FROM users WHERE id = ?')
+            .get(user.id);
+
         res.json({ user: updated });
     } catch (error) {
         if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -677,6 +832,7 @@ app.get('/api/admin/stores', requireAuth, allowRoles('superadmin'), (req, res) =
         LEFT JOIN users m ON m.store_id = s.id AND m.role = 'store_manager'
         ORDER BY s.id
     `).all();
+
     res.json({ stores });
 });
 
@@ -743,11 +899,14 @@ app.patch('/api/admin/stores/:id/manager', requireAuth, allowRoles('superadmin')
 
     const assignManager = db.transaction(() => {
         if (manager) {
-            db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND store_id = ? AND id != ?").run(store.id, manager.id);
-            db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND id = ? AND store_id IS NOT NULL").run(manager.id);
+            db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND store_id = ? AND id != ?")
+                .run(store.id, manager.id);
+            db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND id = ? AND store_id IS NOT NULL")
+                .run(manager.id);
             db.prepare('UPDATE users SET store_id = ? WHERE id = ?').run(store.id, manager.id);
         } else {
-            db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND store_id = ?").run(store.id);
+            db.prepare("UPDATE users SET store_id = NULL WHERE role = 'store_manager' AND store_id = ?")
+                .run(store.id);
         }
     });
 
@@ -762,7 +921,8 @@ app.delete('/api/admin/stores/:id', requireAuth, allowRoles('superadmin'), (req,
         return res.status(404).json({ error: 'Store not found.' });
     }
 
-    const historicOrders = db.prepare('SELECT COUNT(*) AS count FROM orders WHERE store_id = ?').get(store.id).count;
+    const historicOrders = db.prepare('SELECT COUNT(*) AS count FROM orders WHERE store_id = ?')
+        .get(store.id).count;
 
     if (historicOrders > 0) {
         db.prepare('UPDATE stores SET is_active = 0 WHERE id = ?').run(store.id);
@@ -774,7 +934,12 @@ app.delete('/api/admin/stores/:id', requireAuth, allowRoles('superadmin'), (req,
 });
 
 app.get('/api/admin/settings', requireAuth, allowRoles('superadmin'), (req, res) => {
-    const settings = Object.fromEntries(db.prepare('SELECT setting_key, setting_value FROM app_settings ORDER BY setting_key').all().map((item) => [item.setting_key, item.setting_value]));
+    const settings = Object.fromEntries(
+        db.prepare('SELECT setting_key, setting_value FROM app_settings ORDER BY setting_key')
+            .all()
+            .map((item) => [item.setting_key, item.setting_value])
+    );
+
     res.json({ settings });
 });
 
@@ -783,9 +948,7 @@ app.patch('/api/admin/settings', requireAuth, allowRoles('superadmin'), (req, re
     const now = new Date().toISOString();
 
     for (const [key, value] of Object.entries(req.body)) {
-        if (!allowed.has(key) || value === null || value === undefined) {
-            continue;
-        }
+        if (!allowed.has(key) || value === null || value === undefined) continue;
 
         if (key === 'delivery_fee' && (!Number.isFinite(Number(value)) || Number(value) < 0)) {
             return res.status(400).json({ error: 'Delivery fee must be a non-negative number.' });
@@ -795,8 +958,12 @@ app.patch('/api/admin/settings', requireAuth, allowRoles('superadmin'), (req, re
             return res.status(400).json({ error: 'Default ETA must be between 0 and 240 minutes.' });
         }
 
-        db.prepare('INSERT INTO app_settings (setting_key, setting_value, updated_at) VALUES (?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at')
-            .run(key, String(value), now);
+        db.prepare(`
+            INSERT INTO app_settings (setting_key, setting_value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(setting_key)
+            DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+        `).run(key, String(value), now);
     }
 
     res.json({ success: true });
@@ -808,6 +975,7 @@ app.get('/api/admin/ratings', requireAuth, allowRoles('superadmin'), (req, res) 
         FROM ratings r JOIN stores s ON s.id = r.store_id
         ORDER BY r.created_at DESC, r.id DESC
     `).all();
+
     res.json({ ratings });
 });
 
@@ -823,10 +991,18 @@ app.patch('/api/admin/ratings/:id', requireAuth, allowRoles('superadmin'), (req,
     res.json({ success: true });
 });
 
+registerGroupOrderRoutes(app, {
+    db,
+    requireAuth,
+    allowRoles,
+    getProduct,
+    getOrderDetails,
+    calculateOrderDiscounts,
+    logTracking
+});
+
 app.use((error, req, res, next) => {
-    if (res.headersSent) {
-        return next(error);
-    }
+    if (res.headersSent) return next(error);
 
     if (error.code?.startsWith('SQLITE_CONSTRAINT')) {
         return res.status(400).json({ error: 'That change conflicts with existing data.' });

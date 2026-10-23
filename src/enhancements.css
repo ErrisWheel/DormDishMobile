@@ -1058,3 +1058,26 @@ a {
         transition-duration: 0.01ms !important;
     }
 }
+
+.promo-label-pill {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    padding: 5px 7px;
+    border-radius: 7px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.group-order-panel {
+    overflow: hidden;
+}
+
+.app-shell.dark .promo-label-pill {
+    background: var(--accent-soft);
+    color: var(--accent);
+}

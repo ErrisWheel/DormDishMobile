@@ -1,8 +1,10 @@
 import { Capacitor } from '@capacitor/core';
 
 const configuredBase = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '');
-const defaultBase = Capacitor.isNativePlatform() ? 'http://10.0.2.2:4000/api' : '/api';
-const apiBase = configuredBase || defaultBase;
+const nativeBase = 'http://127.0.0.1:4000/api';
+const apiBase = Capacitor.isNativePlatform()
+    ? nativeBase
+    : configuredBase || '/api';
 
 export function getToken() {
     return localStorage.getItem('dormdish-token') || '';
@@ -24,11 +26,19 @@ export async function apiRequest(path, options = {}) {
         ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
         ...options.headers
     };
-    const response = await fetch(`${apiBase}${path}`, {
-        ...options,
-        headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body)
-    });
+
+    let response;
+
+    try {
+        response = await fetch(`${apiBase}${path}`, {
+            ...options,
+            headers,
+            body: options.body === undefined ? undefined : JSON.stringify(options.body)
+        });
+    } catch {
+        throw new Error(`Cannot connect to DormDish API at ${apiBase}. Make sure the backend is running.`);
+    }
+
     const contentType = response.headers.get('content-type') || '';
     const payload = contentType.includes('application/json') ? await response.json() : null;
 
@@ -46,9 +56,7 @@ export function money(value) {
 }
 
 export function formatDate(value) {
-    if (!value) {
-        return 'Not available';
-    }
+    if (!value) return 'Not available';
 
     return new Date(value).toLocaleString('en-PH', {
         dateStyle: 'medium',
