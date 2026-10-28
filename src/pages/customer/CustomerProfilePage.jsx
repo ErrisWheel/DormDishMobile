@@ -46,7 +46,7 @@ export function CustomerProfilePage({ user, address, onAddress, onSave, orders, 
             </div>
 
             <div className="stats-grid profile-stats-grid">
-                <div className="stat-card profile-stat-card"><span>Orders placed</span><strong>{orders.length}</strong><small><PackageCheck size={14} /> Order history in SQLite</small></div>
+                <div className="stat-card profile-stat-card"><span>Orders placed</span><strong>{orders.length}</strong><small><PackageCheck size={14} /> Order history in DormDish</small></div>
                 <div className="stat-card profile-stat-card"><span>Saved favorites</span><strong>{favorites.length}</strong><small><Heart size={14} /> Saved on this device</small></div>
                 <div className="stat-card profile-stat-card"><span>Delivery address</span><strong className="profile-location-status">{address.trim() ? 'Saved locally' : 'Not set'}</strong><small><MapPin size={14} /> Used for future checkouts</small></div>
             </div>

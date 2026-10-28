@@ -31,7 +31,7 @@ export function requireAuth(req, res, next) {
     try {
         const payload = jwt.verify(token, jwtSecret);
         const user = db.prepare(`
-            SELECT id, name, email, role, store_id, is_active, created_at
+            SELECT id, name, email, role, store_id, is_active, is_online, created_at
             FROM users
             WHERE id = ?
         `).get(payload.sub);

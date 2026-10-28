@@ -1,0 +1,38 @@
+/* Readability adjustments: improve undersized labels without changing the page structure. */
+html { font-size: 16px; }
+body { font-size: 15px; line-height: 1.55; }
+input, select, textarea { font-size: 15px; }
+button, .primary-button, .secondary-button, .header-cart-button { font-size: 14px; }
+.muted-copy, .auth-heading p, .demo-access > p, .sidebar-help a { font-size: 14px; line-height: 1.6; }
+.eyebrow, .status-pill, .product-category, .stock-good, .stock-empty, .promo-label-pill, .order-number { font-size: 12px; }
+.role-chip { font-size: 12px; }
+.header-cart-button { font-size: 14px; }
+.header-cart-button b { font-size: 12px; }
+.auth-brand small { font-size: 12px; }
+.topbar, .sidebar, .mobile-bottom-nav { font-size: 14px; }
+.admin-table th, .admin-table td { font-size: 13px; }
+.product-image-preview { display: flex; align-items: center; gap: 12px; margin-top: 2px; color: var(--muted); font-size: 14px; }
+.product-image-preview img { width: 96px; height: 82px; border-radius: 12px; object-fit: cover; border: 1px solid var(--line); background: var(--bg); }
+.product-editor-form input[type="file"] { max-width: 100%; padding: 8px; font-size: 14px; }
+.product-editor-form label small { display: block; margin-top: 5px; font-size: 12px; }
+.rider-presence-panel { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.rider-presence-panel.is-online { border-color: rgba(47, 105, 70, .35); }
+.rider-presence-panel.is-offline { border-color: var(--line); }
+.rider-presence-copy { display: flex; align-items: center; gap: 12px; }
+.rider-presence-copy strong { display: block; font-size: 17px; }
+.rider-presence-copy p { margin: 4px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.rider-presence-dot { width: 12px; height: 12px; flex: 0 0 12px; border-radius: 50%; background: #8A9187; box-shadow: 0 0 0 5px rgba(138,145,135,.12); }
+.rider-presence-panel.is-online .rider-presence-dot { background: #2F9A59; box-shadow: 0 0 0 5px rgba(47,154,89,.13); }
+.rider-jobs-section .dashboard-section-heading h2 { display: flex; align-items: center; gap: 8px; }
+.rider-offer-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.rider-offer-actions .primary-button, .rider-offer-actions .secondary-button { min-height: 44px; }
+.rider-customer-note { padding: 10px 12px; border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 14px; line-height: 1.55; }
+.rider-history-card .rider-delivery-summary small { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.rider-stats-grid .stat-card small { font-size: 13px; line-height: 1.45; }
+@media (max-width: 640px) {
+  body { font-size: 15px; }
+  .rider-presence-panel { align-items: stretch; flex-direction: column; }
+  .rider-presence-panel > button { width: 100%; justify-content: center; }
+  .rider-offer-actions > button { flex: 1 1 140px; justify-content: center; }
+  .product-image-preview { align-items: flex-start; }
+}

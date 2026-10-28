@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "DormDish",
+    "slug": "dormdish",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "dormdish",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dormdish.mobile",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "DormDish uses your photo library to choose store product images."
+      }
+    },
+    "android": {
+      "package": "com.dormdish.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#F3F4EC"
+      }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "DormDish uses your photo library to choose product images.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}

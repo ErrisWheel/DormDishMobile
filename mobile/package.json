@@ -1,0 +1,23 @@
+{
+  "name": "dormdish-expo",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "typecheck": "echo This starter is plain JavaScript; run Expo diagnostics with npx expo-doctor"
+  },
+  "dependencies": {
+    "expo": "~57.0.0",
+    "expo-image-picker": "~57.0.20",
+    "expo-secure-store": "~57.0.4",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

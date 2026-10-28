@@ -71,7 +71,7 @@ export function LoginPage({ onLogin, dark, onToggleDark }) {
                         ))}
                     </div>
                 </div>
-                <div className="auth-note"><ShieldCheck size={16} /><span>Passwords are hashed in the local SQLite database. Demo accounts are for classroom testing only.</span></div>
+                <div className="auth-note"><ShieldCheck size={16} /><span>Passwords are stored as hashes. Demo accounts are for classroom testing only.</span></div>
             </section>
         </main>
     );

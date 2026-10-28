@@ -6,7 +6,7 @@
     padding: 7px 11px;
     color: var(--muted);
     background: var(--bg);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
     white-space: nowrap;
 }
@@ -21,7 +21,7 @@
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 11px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 800;
 }
 
@@ -34,7 +34,7 @@
     border-radius: 7px;
     background: var(--accent);
     color: white;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .top-actions {
@@ -50,7 +50,7 @@
 
 .sidebar-help a {
     color: var(--accent);
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 800;
     text-decoration: none;
 }
@@ -93,7 +93,7 @@
     display: block;
     color: var(--muted);
     font-family: 'DM Sans', sans-serif;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 500;
     letter-spacing: 0;
 }
@@ -111,7 +111,7 @@
 .auth-heading p,
 .demo-access > p {
     color: var(--muted);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.7;
     margin: 0;
 }
@@ -130,7 +130,7 @@
     display: grid;
     gap: 7px;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
 }
 
@@ -153,13 +153,13 @@
     border-radius: 10px;
     color: var(--text);
     background: var(--bg);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
 }
 
 .auth-form .primary-button {
     margin-top: 5px;
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .demo-access {
@@ -175,7 +175,7 @@
     align-items: center;
     gap: 8px;
     margin-bottom: 5px;
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .demo-access-title svg {
@@ -196,7 +196,7 @@
     border-radius: 9px;
     background: var(--surface);
     color: var(--text);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     text-align: left;
 }
@@ -212,7 +212,7 @@
     gap: 8px;
     margin-top: 17px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -266,7 +266,7 @@
 .dashboard-section-heading p {
     margin: 0;
     color: var(--muted);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.65;
 }
 
@@ -310,7 +310,7 @@
     flex-wrap: wrap;
     gap: 13px;
     margin-top: 22px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
 }
 
@@ -364,7 +364,7 @@
     outline: 0;
     background: transparent;
     color: var(--text);
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .store-grid {
@@ -413,7 +413,7 @@
     border-radius: 7px;
     background: var(--accent);
     color: white;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
 }
 
@@ -439,7 +439,7 @@
     align-items: center;
     gap: 4px;
     color: #d99a23;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 800;
     white-space: nowrap;
 }
@@ -448,7 +448,7 @@
     min-height: 38px;
     margin: 9px 0 12px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.65;
 }
 
@@ -457,7 +457,7 @@
     flex-direction: column;
     gap: 7px;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .store-card-meta span {
@@ -476,7 +476,7 @@
     width: 100%;
     margin-top: 14px;
     min-height: 38px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .store-detail-hero {
@@ -507,7 +507,7 @@
 .store-detail-hero p {
     margin: 0 0 14px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.65;
 }
 
@@ -523,7 +523,7 @@
     align-items: center;
     gap: 6px;
     color: var(--accent);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
     line-height: 1.5;
     text-decoration: none;
@@ -542,7 +542,7 @@
     border: 0;
     background: transparent;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 800;
 }
 
@@ -578,14 +578,14 @@
     min-height: 48px;
     margin: 0 0 13px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
 .stock-good,
 .stock-empty {
     color: var(--green);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
 }
 
@@ -617,7 +617,7 @@
 .panel-heading p {
     margin: 0;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -643,7 +643,7 @@
 .stat-card > span {
     display: block;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -661,7 +661,7 @@
 
 .stat-card small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.5;
 }
 
@@ -701,13 +701,13 @@
     border-radius: 10px;
     background: var(--accent-soft);
     color: var(--accent-dark);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.55;
 }
 
 .muted-copy {
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.65;
 }
 
@@ -737,7 +737,7 @@
     margin: 0 0 17px;
     max-width: 420px;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.65;
 }
 
@@ -767,7 +767,7 @@
 
 .order-number {
     color: var(--accent);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 0.35px;
 }
@@ -780,7 +780,7 @@
 .role-order-header p {
     margin: 0;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .status-pill {
@@ -793,7 +793,7 @@
     border-radius: 8px;
     background: var(--bg);
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     line-height: 1.35;
     text-align: center;
@@ -838,7 +838,7 @@
     justify-content: space-between;
     gap: 15px;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .role-order-items strong {
@@ -878,7 +878,7 @@
 .eta-copy > span,
 .eta-total > span {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -888,7 +888,7 @@
 
 .eta-copy small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.5;
 }
 
@@ -954,7 +954,7 @@
 
 .progress-step small {
     max-width: 100%;
-    font-size: 8px;
+    font-size: 12px;
     line-height: 1.4;
     overflow-wrap: anywhere;
 }
@@ -969,7 +969,7 @@
     align-items: center;
     gap: 7px;
     margin-bottom: 13px;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .tracking-feed-title svg {
@@ -1011,19 +1011,19 @@
 }
 
 .tracking-event strong {
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .tracking-event p {
     margin: 4px 0;
     color: var(--text);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
 .tracking-event small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .order-location-actions {
@@ -1042,7 +1042,7 @@
     align-items: flex-start;
     gap: 6px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .order-location-actions > span svg {
@@ -1059,13 +1059,13 @@
 }
 
 .rating-form > div:first-child strong {
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .rating-form > div:first-child p {
     margin: 4px 0 12px;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .rating-controls {
@@ -1076,19 +1076,19 @@
 }
 
 .rating-controls label {
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .rating-controls input,
 .rating-controls select {
     padding: 9px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .rating-controls .primary-button {
     min-height: 35px;
     padding: 9px 11px;
-    font-size: 9px;
+    font-size: 12px;
     white-space: nowrap;
 }
 
@@ -1101,7 +1101,7 @@
     border-radius: 9px;
     background: var(--bg);
     color: #c18a20;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -1149,13 +1149,13 @@
 }
 
 .cart-line-copy > strong {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.5;
 }
 
 .cart-line-copy > small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .cart-quantity {
@@ -1182,7 +1182,7 @@
 
 .cart-quantity span {
     min-width: 10px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
     text-align: center;
 }
@@ -1195,7 +1195,7 @@
 }
 
 .cart-line-total > strong {
-    font-size: 11px;
+    font-size: 13px;
     white-space: nowrap;
 }
 
@@ -1226,19 +1226,19 @@
     justify-content: space-between;
     gap: 12px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .checkout-total-lines strong {
     color: var(--text);
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .checkout-total-lines .checkout-grand-total {
     padding-top: 10px;
     border-top: 1px dashed var(--line);
     color: var(--text);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 800;
 }
 
@@ -1249,7 +1249,7 @@
 .checkout-footnote {
     margin: 12px 0 0;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -1263,7 +1263,7 @@
     gap: 9px 15px;
     padding-bottom: 15px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .manager-order-facts span {
@@ -1299,7 +1299,7 @@
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .tracking-editor-heading strong svg {
@@ -1308,7 +1308,7 @@
 
 .tracking-editor-heading > span {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     text-align: right;
 }
 
@@ -1317,13 +1317,13 @@
 }
 
 .tracking-editor .form-grid label {
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .tracking-editor .form-grid input,
 .tracking-editor .form-grid select {
     padding: 9px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .tracking-editor-actions {
@@ -1337,17 +1337,17 @@
 .tracking-editor-actions > .primary-button,
 .tracking-editor > .primary-button {
     padding: 10px 12px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .assign-rider-field {
     width: min(240px, 100%);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .assign-rider-field select {
     padding: 9px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .manager-latest-update {
@@ -1356,7 +1356,7 @@
     gap: 6px;
     margin-top: 11px;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -1380,7 +1380,7 @@
     padding: 11px 9px;
     border-bottom: 1px solid var(--line);
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     white-space: nowrap;
 }
@@ -1389,7 +1389,7 @@
     padding: 11px 9px;
     border-bottom: 1px solid var(--line);
     color: var(--text);
-    font-size: 10px;
+    font-size: 12px;
     vertical-align: middle;
 }
 
@@ -1401,7 +1401,7 @@
 .table-select {
     min-width: 120px;
     padding: 8px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .table-active-toggle {
@@ -1409,7 +1409,7 @@
     align-items: center;
     gap: 5px;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     white-space: nowrap;
 }
 
@@ -1440,17 +1440,17 @@
 }
 
 .table-product strong {
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .table-product small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .small-button {
     padding: 8px 9px;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .store-admin-grid {
@@ -1489,7 +1489,7 @@
 .store-admin-header p {
     margin: 0;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .store-admin-card .form-grid {
@@ -1497,13 +1497,13 @@
 }
 
 .store-admin-card .form-grid label {
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .store-admin-card .form-grid input,
 .store-admin-card .form-grid select {
     padding: 9px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .store-admin-actions {
@@ -1514,7 +1514,7 @@
 
 .store-admin-actions button {
     padding: 10px;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .rating-list {
@@ -1539,7 +1539,7 @@
     gap: 5px;
     min-width: 49px;
     color: #ce921d;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 800;
 }
 
@@ -1548,19 +1548,19 @@
 }
 
 .rating-row > div:last-child strong {
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .rating-row p {
     margin: 5px 0;
     color: var(--text);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
 .rating-row small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .rating-review-cell {
@@ -1585,11 +1585,11 @@
 
 .rider-delivery-summary span {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .rider-delivery-summary strong {
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.5;
     overflow-wrap: anywhere;
 }
@@ -1606,7 +1606,7 @@
     border-radius: 8px;
     background: var(--bg);
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .rider-map-links {
@@ -1624,7 +1624,7 @@
     border-radius: 10px;
     background: var(--bg);
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .rider-completed-note svg {
@@ -1651,7 +1651,7 @@
     border: 0;
     background: transparent;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -1670,7 +1670,7 @@
     background: var(--surface);
     color: var(--muted);
     box-shadow: var(--shadow);
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .mobile-bottom-nav {
@@ -1774,7 +1774,7 @@
         border-radius: 10px;
         background: transparent;
         color: var(--muted);
-        font-size: 8px;
+        font-size: 12px;
         font-weight: 700;
     }
 
@@ -1794,7 +1794,7 @@
         border-radius: 6px;
         background: var(--accent);
         color: #fff;
-        font-size: 8px;
+        font-size: 12px;
     }
 
     .role-chip {
@@ -1816,7 +1816,7 @@
     .header-cart-button {
         gap: 5px;
         padding: 8px;
-        font-size: 10px;
+        font-size: 12px;
     }
 
     .dashboard-section-heading {
@@ -1915,7 +1915,7 @@
     }
 
     .customer-hero p {
-        font-size: 11px;
+        font-size: 13px;
     }
 
     .customer-hero-image {
@@ -1968,11 +1968,11 @@
 
     .role-product-card .product-details > p {
         min-height: unset;
-        font-size: 9px;
+        font-size: 12px;
     }
 
     .role-product-card h3 {
-        font-size: 12px;
+        font-size: 13px;
     }
 
     .role-product-card .product-bottom strong {
@@ -2052,7 +2052,7 @@
     }
 
     .eta-total strong {
-        font-size: 12px;
+        font-size: 13px;
     }
 
     .order-progress {
@@ -2060,7 +2060,7 @@
     }
 
     .progress-step small {
-        font-size: 7px;
+        font-size: 12px;
     }
 
     .progress-step > span {
@@ -2086,7 +2086,7 @@
     }
 
     .cart-line-total > strong {
-        font-size: 10px;
+        font-size: 12px;
     }
 
     .cart-line-total .icon-button {

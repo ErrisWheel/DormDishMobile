@@ -1,0 +1,24 @@
+DORMDISH PATCH — CONTENTS AND APPLY NOTES
+
+This archive is a patch, not a full project. Extract its contents into the root of your existing DormDishMobile-main folder and allow listed files to be overwritten. Keep a backup first.
+
+New files:
+- SETUP-HOSTING.md
+- scripts/migrate-sqlite-to-neon.js
+- server/postgres-index.js
+- server/schema.postgres.sql
+- server/sqlite-index.js (local SQLite server implementation moved from the previous server/index.js)
+- src/readability.css
+- mobile/* (separate Expo app starter)
+
+Updated files:
+- .env.example, .gitignore, package.json
+- server/index.js, server/auth.js, server/database.js, server/group-orders.js
+- src/App.jsx and the listed customer/manager/rider components and styles
+
+IMPORTANT:
+- This archive does not include node_modules, package-lock.json, your local SQLite DB, or production secrets.
+- Run `npm install` in the project root after applying this patch so the PostgreSQL dependency is installed and package-lock.json is refreshed.
+- For local development leave DATABASE_URL blank to keep using SQLite.
+- The Neon migration script requires your actual local SQLite file and an empty target Neon database/branch. Back up the database first.
+- Read SETUP-HOSTING.md before deploying. Full Vite build and test suite were not verified in the patch-authoring environment because its preinstalled dependencies were incomplete and package registry access was unavailable. Changed JS syntax and JSON config files were checked.

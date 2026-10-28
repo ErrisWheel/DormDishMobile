@@ -168,14 +168,14 @@ a {
 
 .confirmation-reference > span {
     color: #627568;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 1px;
 }
 
 .confirmation-reference > strong {
     color: #1f3c2a;
-    font-size: 12px;
+    font-size: 13px;
     overflow-wrap: anywhere;
 }
 
@@ -185,7 +185,7 @@ a {
     border-radius: 8px;
     background: #e3f4e8;
     color: #276b43;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
 }
 
@@ -221,7 +221,7 @@ a {
 .confirmation-route-panel .panel-heading p {
     margin: 0;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.6;
 }
 
@@ -264,7 +264,7 @@ a {
 
 .confirmation-store-line span {
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.5;
 }
 
@@ -280,7 +280,7 @@ a {
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .confirmation-items > div > span {
@@ -321,12 +321,12 @@ a {
 .confirmation-details-grid span,
 .confirmation-details-grid small {
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.5;
 }
 
 .confirmation-details-grid strong {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.5;
 }
 
@@ -374,19 +374,19 @@ a {
 
 .route-stop small {
     color: var(--muted);
-    font-size: 8px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 1px;
 }
 
 .route-stop strong {
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.4;
 }
 
 .route-stop > div > span {
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.55;
     overflow-wrap: anywhere;
 }
@@ -406,7 +406,7 @@ a {
     border-radius: 5px;
     background: var(--bg);
     color: var(--muted);
-    font-size: 8px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 0.8px;
 }
@@ -432,7 +432,7 @@ a {
     gap: 7px;
     min-height: 35px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
     text-decoration: none;
 }
@@ -456,7 +456,7 @@ a {
     border-radius: 11px;
     background: var(--bg);
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -487,13 +487,13 @@ a {
 }
 
 .confirmation-next-steps strong {
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .confirmation-next-steps p {
     margin: 5px 0 0;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -502,7 +502,7 @@ a {
     align-items: center;
     gap: 6px;
     color: var(--green);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     white-space: nowrap;
 }
@@ -547,7 +547,7 @@ a {
     align-items: center;
     gap: 5px;
     color: var(--green);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
 }
 
@@ -561,7 +561,7 @@ a {
 .profile-identity-copy p {
     margin: 0;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
     overflow-wrap: anywhere;
 }
 
@@ -573,7 +573,7 @@ a {
     border: 1px solid var(--line);
     border-radius: 999px;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     white-space: nowrap;
 }
@@ -619,7 +619,7 @@ a {
 .profile-address-panel .panel-heading p {
     margin: 0;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -631,7 +631,7 @@ a {
     display: block;
     margin-top: 5px;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 400;
 }
 
@@ -639,7 +639,7 @@ a {
     display: flex;
     flex-direction: column;
     gap: 7px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -651,7 +651,7 @@ a {
     resize: vertical;
     background: var(--bg);
     color: var(--text);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.6;
 }
 
@@ -661,7 +661,7 @@ a {
     gap: 8px;
     margin: 12px 0 10px;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -734,7 +734,7 @@ a {
 .order-route-heading p {
     margin: 0;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.6;
 }
 
@@ -758,7 +758,7 @@ a {
 }
 
 .order-route-stops .route-stop strong {
-    font-size: 10px;
+    font-size: 12px;
     overflow-wrap: anywhere;
 }
 
@@ -797,7 +797,7 @@ a {
     gap: 7px;
     min-height: 39px;
     padding: 0 12px;
-    font-size: 10px;
+    font-size: 12px;
     text-decoration: none;
 }
 
@@ -932,7 +932,7 @@ a {
     }
 
     .confirmation-hero > p {
-        font-size: 11px;
+        font-size: 13px;
     }
 
     .confirmation-check {
@@ -980,7 +980,7 @@ a {
     }
 
     .confirmation-next-steps p {
-        font-size: 9px;
+        font-size: 12px;
     }
 
     .confirmation-next-badge {
@@ -1057,4 +1057,27 @@ a {
         scroll-behavior: auto !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+.promo-label-pill {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    padding: 5px 7px;
+    border-radius: 7px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.group-order-panel {
+    overflow: hidden;
+}
+
+.app-shell.dark .promo-label-pill {
+    background: var(--accent-soft);
+    color: var(--accent);
 }
