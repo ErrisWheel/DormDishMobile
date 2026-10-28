@@ -1,8 +1,20 @@
 import { Capacitor } from '@capacitor/core';
 
-const configuredBase = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '');
-const defaultBase = Capacitor.isNativePlatform() ? 'http://10.0.2.2:4000/api' : '/api';
-const apiBase = configuredBase || defaultBase;
+function normalizeApiBase(value) {
+    const cleaned = String(value || '')
+        .trim()
+        // Ignore an accidental query/hash copied into a Render environment value.
+        .split(/[?#]/, 1)[0]
+        .replace(/\/+$/, '');
+
+    if (!cleaned) return '';
+    return /\/api$/i.test(cleaned) ? cleaned : `${cleaned}/api`;
+}
+
+const configuredBase = normalizeApiBase(import.meta.env.VITE_API_URL);
+const localNativeBase = 'http://127.0.0.1:4000/api';
+// VITE_API_URL takes precedence for the deployed website and for production Capacitor builds.
+const apiBase = configuredBase || (Capacitor.isNativePlatform() ? localNativeBase : '/api');
 
 export function getToken() {
     return localStorage.getItem('dormdish-token') || '';
@@ -24,20 +36,25 @@ export async function apiRequest(path, options = {}) {
         ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
         ...options.headers
     };
-    const response = await fetch(`${apiBase}${path}`, {
-        ...options,
-        headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body)
-    });
+
+    let response;
+    try {
+        response = await fetch(`${apiBase}${path.startsWith('/') ? path : `/${path}`}`, {
+            ...options,
+            headers,
+            body: options.body === undefined ? undefined : JSON.stringify(options.body)
+        });
+    } catch {
+        throw new Error(`Cannot connect to DormDish API at ${apiBase}. Check the API URL and that the backend is running.`);
+    }
+
     const contentType = response.headers.get('content-type') || '';
     const payload = contentType.includes('application/json') ? await response.json() : null;
-
     if (!response.ok) {
         const error = new Error(payload?.error || `Request failed (${response.status}).`);
         error.status = response.status;
         throw error;
     }
-
     return payload;
 }
 
@@ -46,14 +63,8 @@ export function money(value) {
 }
 
 export function formatDate(value) {
-    if (!value) {
-        return 'Not available';
-    }
-
-    return new Date(value).toLocaleString('en-PH', {
-        dateStyle: 'medium',
-        timeStyle: 'short'
-    });
+    if (!value) return 'Not available';
+    return new Date(value).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export function roleLabel(role) {

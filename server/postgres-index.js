@@ -38,14 +38,35 @@ const allowedRoles = new Set(['superadmin', 'store_manager', 'customer', 'rider'
 const roleOrder = "CASE role WHEN 'superadmin' THEN 0 WHEN 'store_manager' THEN 1 WHEN 'rider' THEN 2 ELSE 3 END";
 const allowedSettings = new Set(['app_name', 'delivery_fee', 'default_eta_minutes', 'campus_location', 'student_discount_percent', 'group_discount_percent', 'group_discount_min_members', 'group_discount_min_subtotal']);
 
-const configuredOrigins = (process.env.CORS_ORIGIN || '').split(',').map((x) => x.trim()).filter(Boolean);
-app.use(cors({
+function normalizeOrigin(value) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  try {
+    // CORS compares origins, not full URLs. URL.origin removes trailing paths, slashes, and query strings.
+    return new URL(input).origin;
+  } catch {
+    return input.split(/[/?#]/, 1)[0].replace(/\/+$/, '');
+  }
+}
+
+const configuredOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(normalizeOrigin)
+  .filter(Boolean);
+const corsOptions = {
   origin(origin, callback) {
-    if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Origin is not allowed by CORS.'));
+    const requestOrigin = normalizeOrigin(origin);
+    if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes(requestOrigin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Origin is not allowed by CORS: ${requestOrigin}`));
   },
-  credentials: true
-}));
+  credentials: true,
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204
+};
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '8mb' }));
 
 const run = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);

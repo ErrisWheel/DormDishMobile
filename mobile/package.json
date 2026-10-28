@@ -7,14 +7,13 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "typecheck": "echo This starter is plain JavaScript; run Expo diagnostics with npx expo-doctor"
+    "typecheck": "echo This app is an Expo WebView shell; use npx expo-doctor for diagnostics"
   },
   "dependencies": {
     "expo": "~58.0.0",
-    "expo-image-picker": "~58.0.10",
-    "expo-secure-store": "~58.0.2",
     "react": "19.3.0",
-    "react-native": "0.88.0"
+    "react-native": "0.88.0",
+    "react-native-webview": "14.0.1"
   },
   "devDependencies": {},
   "engines": {

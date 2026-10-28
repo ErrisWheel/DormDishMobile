@@ -1,6 +1,6 @@
 # DormDish setup (Windows + VS Code)
 
-This patch keeps the existing Vite website, keeps SQLite for local development/tests, and adds a PostgreSQL path for Render + Neon. The Expo app is in `mobile/` and uses the same hosted API. Manager-uploaded product photos are stored as binary data in PostgreSQL on Neon (and as BLOBs in local SQLite mode).
+This patch keeps the existing Vite website, keeps SQLite for local development/tests, and adds a PostgreSQL path for Render + Neon. The Expo app is in `mobile/` and loads the hosted website through WebView for exact UI and workflow parity. Manager-uploaded product photos are stored as binary data in PostgreSQL on Neon (and as BLOBs in local SQLite mode).
 
 ## 1. Apply the patch
 
@@ -53,27 +53,29 @@ This patch keeps the existing Vite website, keeps SQLite for local development/t
 
 1. In Render, choose **New → Static Site** and connect the same repository.
 2. Root Directory: repository root. Build Command: `npm install && npm run build`. Publish Directory: `dist`.
-3. Add the build-time environment variable `VITE_API_URL` = `https://YOUR-API.onrender.com/api` (the actual Render API URL with `/api`). Then deploy/redeploy.
+3. Add the build-time environment variable `VITE_API_URL` = `https://YOUR-API.onrender.com/api` (the actual Render API URL with `/api`). The updated API helper also appends `/api` if you accidentally omit it, but setting the complete value is still recommended. Then deploy/redeploy.
 4. Keep `CORS_ORIGIN` on the API set to the full website URL, including `https://`. If you add a custom domain, update the allowed origin and redeploy the API.
 
-## 5. Expo mobile app (Android + iOS)
+## 5. Expo mobile app (Android + iOS) — exact UI parity
 
-The Expo project is separate from the existing Vite website and existing Capacitor Android project: `mobile/`. It signs in and loads data through the same API. The mobile project targets Expo SDK 58 to match the Expo Go version shown in your iPhone screenshot. Expo requires the project SDK to match Expo Go; see https://docs.expo.dev/troubleshooting/expo-go-version-mismatch/.
+The Expo project is intentionally a WebView shell that loads the same deployed Vite website. This is what keeps the website, existing Capacitor Android app, and Expo iOS app visually and functionally aligned without maintaining a second implementation of every page. The React Native frontend is not separately rendered in this setup; the website must be reachable over the internet.
 
-1. Open a second VS Code window with the `mobile` folder.
-2. Copy `mobile/.env.example` to `mobile/.env` and replace the example with your real API URL: `EXPO_PUBLIC_API_URL=https://YOUR-API.onrender.com/api` and `EXPO_PUBLIC_WEBSITE_URL=https://YOUR-WEBSITE.onrender.com`. The second variable resolves existing `/images/...` assets for the native app. For local Android emulator testing use API `http://10.0.2.2:4000/api` and website `http://10.0.2.2:5173`; for an iOS simulator on a Mac use API `http://localhost:4000/api` and website `http://localhost:5173`. A physical iPhone on another network should use the deployed Render URLs.
-3. Run these PowerShell commands:
+1. In `mobile/`, copy `.env.example` to `.env`. The default URL is `https://dormdishmobile-static.onrender.com`; change it if Render assigned your static site a different URL.
+2. In PowerShell:
 
    ```powershell
+   cd mobile
    npm install
    npx expo install --fix
    npx expo-doctor
    npx expo start --clear
    ```
 
-4. Use Android Studio's emulator for Android testing. To generate/open native Android project files when needed, run `npx expo prebuild --platform android`, then open `mobile/android` in Android Studio. The existing root-level `android/` folder belongs to the previous Capacitor app; do not confuse the two.
-5. For iOS cloud builds from Windows, install EAS CLI with `npm install -g eas-cli`, sign in using `eas login`, then from `mobile/` run `eas build:configure` and `eas build --platform ios`. Follow EAS prompts to create/sign with Apple credentials. Set both `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_WEBSITE_URL` in the EAS environment/build profile too; mobile `EXPO_PUBLIC_*` variables are embedded at build time.
-6. For an App Store release, you will need the appropriate Apple Developer Program membership. An iOS build file is not the same as having an App Store-published app. Without an iPhone or Mac, use EAS's remote build and available remote simulation/testing options; you may still need an iPhone/TestFlight tester to verify real-device behavior.
+3. Scan the QR code in Expo Go on your iPhone. Since the WebView loads the hosted website, Expo needs the website URL—not the API URL. The website itself uses its `VITE_API_URL` build-time setting to connect to the backend.
+4. For local testing on a phone, set `EXPO_PUBLIC_WEBSITE_URL` to your PC's LAN IP and Vite port, for example `http://192.168.1.20:5173`. Keep the phone and PC on the same Wi-Fi. Vite's `/api` proxy routes calls to the local backend.
+5. For an iOS cloud build from Windows, install EAS CLI (`npm install -g eas-cli`), sign in (`eas login`), then run from `mobile/`: `eas build:configure` and `eas build --platform ios`. The URL is embedded during bundling, so use the deployed website URL for production builds.
+
+Important: this approach achieves 1:1 UI/workflow parity by reusing the website. If your course requires each mobile screen to be implemented as native React Native components and does not permit a WebView, a separate full React Native UI port is needed instead.
 
 ## 6. Product-photo storage in Neon
 
@@ -96,5 +98,5 @@ Then verify sign-in, product edit/upload, customer checkout, manager status prog
 
 - If `DATABASE_URL` is set in the root `.env`, `npm run server` uses Neon. Leave it blank to use the existing local SQLite mode.
 - Keep secrets server-only. Do not expose `DATABASE_URL` or `JWT_SECRET` via `VITE_*` or `EXPO_PUBLIC_*` variables.
-- The initial Expo app has customer browsing/checkout/orders, rider availability/job flow, manager product/order basics, and admin listings. The existing website remains the full management experience; mobile role screens are an additional native frontend and will need visual/functional parity review before public release.
+- Expo intentionally loads the hosted website inside a WebView so it uses the exact same pages and business workflow as the web frontend and the existing Capacitor Android app. This means the hosted website must be reachable over the internet; it is not a separate native React Native UI.
 - Existing local data is not included in the source ZIP because the SQLite database is local/ignored. Copy your actual `server/data/dormdish.sqlite` into your local project before migrating if you need those real records.
