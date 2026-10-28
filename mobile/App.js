@@ -13,11 +13,40 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 
-// Hosting the same website inside Expo is the only dependable way to keep its UI,
-// navigation, forms, and workflows identical without maintaining a second UI implementation.
-const WEBSITE_URL = String(
-  process.env.EXPO_PUBLIC_WEBSITE_URL || 'https://dormdishmobile-static.onrender.com'
-).trim().replace(/\/+$/, '');
+const DEFAULT_WEBSITE_URL = 'https://dormdishmobile-static.onrender.com/';
+
+// Avoid relying on the WHATWG URL global in the native JavaScript runtime.
+// Some Hermes/runtime combinations can fail here and accidentally block every
+// WebView navigation through onShouldStartLoadWithRequest.
+function getOrigin(value) {
+  const match = String(value || '').trim().match(/^(https?:\/\/[^/?#]+)/i);
+  return match ? match[1].replace(/\/+$/, '').toLowerCase() : '';
+}
+
+function normalizeWebsiteUrl(value) {
+  const origin = getOrigin(value);
+  // A common configuration mistake is using the backend/API URL as the website.
+  // For this project, the Expo shell must render the Static Site, not the API.
+  if (!origin || origin === 'https://dormdish-api.onrender.com') {
+    return DEFAULT_WEBSITE_URL;
+  }
+  // Always start at the origin root. Do not start inside a stale /api or
+  // client-side route path inherited from a local .env file.
+  return `${origin}/`;
+}
+
+function getPathname(value) {
+  const text = String(value || '');
+  const origin = getOrigin(text);
+  if (!origin) return '';
+  const remainder = text.slice(origin.length).split(/[?#]/, 1)[0];
+  return remainder || '/';
+}
+
+const WEBSITE_URL = normalizeWebsiteUrl(
+  process.env.EXPO_PUBLIC_WEBSITE_URL || DEFAULT_WEBSITE_URL
+);
+const WEBSITE_ORIGIN = getOrigin(WEBSITE_URL);
 const BG = '#f7f8f5';
 const TEXT = '#24251f';
 const MUTED = '#85877f';
@@ -25,12 +54,14 @@ const ACCENT = '#e84335';
 
 export default function App() {
   const webview = useRef(null);
+  const recovered404Url = useRef('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [canGoBack, setCanGoBack] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const retry = useCallback(() => {
+    recovered404Url.current = '';
     setLoadError('');
     setLoading(true);
     setReloadKey((value) => value + 1);
@@ -49,19 +80,19 @@ export default function App() {
   }, [canGoBack]);
 
   const shouldStartLoad = useCallback((request) => {
-    const target = request?.url || '';
+    const target = String(request?.url || '').trim();
     if (!target || target === 'about:blank') return true;
-    try {
-      const url = new URL(target);
-      const siteOrigin = new URL(WEBSITE_URL).origin;
-      if (url.origin === siteOrigin || ['data:', 'blob:'].includes(url.protocol)) return true;
-      if (['https:', 'http:', 'mailto:', 'tel:'].includes(url.protocol)) {
-        Linking.openURL(target).catch(() => {});
-      }
-      return false;
-    } catch {
-      return false;
+    if (/^(data:|blob:)/i.test(target)) return true;
+
+    const targetOrigin = getOrigin(target);
+    if (targetOrigin && targetOrigin === WEBSITE_ORIGIN) return true;
+
+    // Open external URLs / phone / email links outside the app, but never block
+    // same-site website navigation because URL parsing failed in the native VM.
+    if (/^(https?:\/\/|mailto:|tel:)/i.test(target)) {
+      Linking.openURL(target).catch(() => {});
     }
+    return false;
   }, []);
 
   const openExternalWindow = useCallback((event) => {
@@ -95,7 +126,7 @@ export default function App() {
       allowsBackForwardNavigationGestures
       setSupportMultipleWindows={false}
       startInLoadingState={false}
-      cacheEnabled
+      cacheEnabled={false}
       onShouldStartLoadWithRequest={shouldStartLoad}
       onOpenWindow={openExternalWindow}
       onNavigationStateChange={(state) => setCanGoBack(Boolean(state.canGoBack))}
@@ -103,12 +134,33 @@ export default function App() {
       onLoadEnd={() => setLoading(false)}
       onError={(event) => {
         setLoading(false);
-        setLoadError(event?.nativeEvent?.description || 'Could not load the DormDish website. Check your connection and the Render Static Site URL.');
+        const description = event?.nativeEvent?.description;
+        setLoadError(description
+          ? `Could not load DormDish: ${description}`
+          : 'Could not load the DormDish website. Check your connection and the Render Static Site URL.');
       }}
       onHttpError={(event) => {
-        if (event?.nativeEvent?.isForMainFrame && event.nativeEvent.statusCode >= 400) {
+        const nativeEvent = event?.nativeEvent || {};
+        const status = Number(nativeEvent.statusCode || 0);
+        const failedUrl = String(nativeEvent.url || '');
+        const isMainFrame = nativeEvent.isForMainFrame !== false;
+
+        // If the web server returns a real 404 for an in-site route, return to
+        // the known-good root once instead of leaving the Expo shell on Not Found.
+        if (isMainFrame && status === 404 && getOrigin(failedUrl) === WEBSITE_ORIGIN) {
+          const pathname = getPathname(failedUrl);
+          if (pathname !== '/' && failedUrl !== recovered404Url.current) {
+            recovered404Url.current = failedUrl;
+            setLoadError('');
+            setLoading(true);
+            setReloadKey((value) => value + 1);
+            return;
+          }
+        }
+
+        if (isMainFrame && status >= 400) {
           setLoading(false);
-          setLoadError(`The DormDish website returned HTTP ${event.nativeEvent.statusCode}. Check that the Render Static Site is deployed.`);
+          setLoadError(`DormDish returned HTTP ${status}. The app tried its home page if this was a route error; reload after checking the hosted site.`);
         }
       }}
       renderLoading={() => null}

@@ -1,24 +1,27 @@
-DormDish website API + Expo parity patch
+DormDish Expo-only Not Found fix
 
-Files to overlay into the existing DormDish project root:
-- src/lib/api.js: guarantees the API base ends in /api; uses VITE_API_URL for both browser and Capacitor builds.
-- server/postgres-index.js: normalizes CORS_ORIGIN values and compares origin-only values, so an accidental trailing slash or query mark does not break matching.
-- mobile/App.js: replaces the separate, partial native screens with an Expo WebView shell loading the same deployed Vite website. This is the deliberate choice for 1:1 UI/workflow parity.
-- mobile/package.json / mobile/app.json: use the SDK 58-compatible react-native-webview package and remove now-unused native image-picker/secure-store plugins.
-- mobile/.env.example: uses the actual Render Static Site URL as the default.
+Changed file:
+  mobile/App.js
 
-RENDER SETTINGS
-Static Site environment:
-  VITE_API_URL=https://dormdish-api.onrender.com/api
+What this fixes:
+- Removes the native WebView navigation guard's dependency on the JavaScript URL constructor. On a native runtime where URL parsing fails, that guard could return false and block website loads/navigation.
+- Normalizes EXPO_PUBLIC_WEBSITE_URL to the host root so a stale /login or /api path won't become the initial page.
+- Falls back once to the root if a same-site route returns a real HTTP 404.
+- Disables WebView caching while testing so an old not-found response isn't reused.
+- If the Expo environment was accidentally pointed at https://dormdish-api.onrender.com, it uses the known working website https://dormdishmobile-static.onrender.com/ instead.
 
-Web Service environment:
-  CORS_ORIGIN=https://dormdishmobile-static.onrender.com
-  DATABASE_URL=<your Neon pooled connection string>
-  JWT_SECRET=<your random secret>
+No Render environment, Vite configuration, CORS setting, backend, or database file is changed.
 
-The API URL must contain /api. CORS_ORIGIN must be the static website origin, with no /api, question mark, or trailing slash. Change the hostname if your Render services have different actual URLs.
+Apply:
+1. Extract this ZIP into the DormDish project root, preserving folders and overwriting mobile/App.js.
+2. In PowerShell:
 
-AFTER OVERLAYING
-From the project root, run npm install, npm run build, then commit and push. Redeploy both Render services. In E:\DormDishMobile\mobile, copy .env.example to .env, run npm install, npx expo install --fix, npx expo-doctor, and npx expo start --clear.
+   cd E:\DormDishMobile\mobile
+   npm install
+   npx expo install --fix
+   npx expo start --clear
 
-Note: this Expo app is a WebView wrapper on purpose. It runs the actual website inside an Expo-built app, which means the Vite website is the single source of UI and workflow. It requires internet access when the website is hosted on Render. If the professor specifically requires a fully native React Native UI (not a WebView), this option will not meet that stricter requirement; exact parity would then require porting every web screen and interaction into React Native components.
+3. Open the new QR code in Expo Go. Make sure you run Expo from the mobile folder, not the project root.
+
+Expo uses the hosted website inside a WebView. The startup URL is the website root:
+  https://dormdishmobile-static.onrender.com/
