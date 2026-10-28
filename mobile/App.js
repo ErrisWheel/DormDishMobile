@@ -234,10 +234,47 @@ export default function App() {
 
         const requestInit = { method, headers: safeHeaders };
         if (message.body != null && !['GET', 'HEAD'].includes(method)) requestInit.body = String(message.body);
+
+        // Some deployed API builds expose routes at /auth/* while newer builds
+        // expose them at /api/auth/*. Retry only a framework-level HTML 404;
+        // never retry a normal JSON 404 from a matched application route.
+        const isRouteHtml404 = (status, contentType, body) => {
+          if (Number(status) !== 404) return false;
+          const type = String(contentType || '').toLowerCase();
+          const text = String(body || '');
+          return !type.includes('application/json') || /<!doctype\s+html|<html[\s>]|Cannot\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\s+\//i.test(text);
+        };
+
         const response = await fetch(targetUrl, requestInit);
-        responsePayload.status = response.status;
-        responsePayload.body = await response.text();
-        responsePayload.headers = { 'content-type': response.headers.get('content-type') || 'application/json' };
+        const originalContentType = response.headers.get('content-type') || 'application/json';
+        const originalBody = await response.text();
+        if (isRouteHtml404(response.status, originalContentType, originalBody)) {
+          const unprefixedUrl = targetUrl.replace(/^https:\/\/dormdish-api\.onrender\.com\/api(?=\/|[?#]|$)/i, API_ORIGIN);
+          if (unprefixedUrl !== targetUrl) {
+            const fallbackResponse = await fetch(unprefixedUrl, requestInit);
+            const fallbackContentType = fallbackResponse.headers.get('content-type') || 'application/json';
+            const fallbackBody = await fallbackResponse.text();
+            if (isRouteHtml404(fallbackResponse.status, fallbackContentType, fallbackBody)) {
+              responsePayload.status = 404;
+              responsePayload.body = JSON.stringify({
+                error: `The DormDish API responded, but the login/API route is missing at both /api${getPathname(unprefixedUrl)} and ${getPathname(unprefixedUrl)}. This is a backend route/deployment mismatch, not an incorrect password.`
+              });
+              responsePayload.headers = { 'content-type': 'application/json' };
+            } else {
+              responsePayload.status = fallbackResponse.status;
+              responsePayload.body = fallbackBody;
+              responsePayload.headers = { 'content-type': fallbackContentType };
+            }
+          } else {
+            responsePayload.status = response.status;
+            responsePayload.body = originalBody;
+            responsePayload.headers = { 'content-type': originalContentType };
+          }
+        } else {
+          responsePayload.status = response.status;
+          responsePayload.body = originalBody;
+          responsePayload.headers = { 'content-type': originalContentType };
+        }
       } catch (error) {
         responsePayload.status = 503;
         responsePayload.transportError = `The app could not reach ${API_ORIGIN}. Render may be waking up or the API service may be unavailable. Native network error: ${String(error?.message || error)}`;
