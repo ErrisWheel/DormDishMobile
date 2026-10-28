@@ -1,19 +1,18 @@
-DormDish Expo-only Not Found fix
+DormDish Expo API + mobile zoom fix
 
 Changed file:
   mobile/App.js
 
-What this fixes:
-- Removes the native WebView navigation guard's dependency on the JavaScript URL constructor. On a native runtime where URL parsing fails, that guard could return false and block website loads/navigation.
-- Normalizes EXPO_PUBLIC_WEBSITE_URL to the host root so a stale /login or /api path won't become the initial page.
-- Falls back once to the root if a same-site route returns a real HTTP 404.
-- Disables WebView caching while testing so an old not-found response isn't reused.
-- If the Expo environment was accidentally pointed at https://dormdish-api.onrender.com, it uses the known working website https://dormdishmobile-static.onrender.com/ instead.
-
-No Render environment, Vite configuration, CORS setting, backend, or database file is changed.
+Changes:
+- Routes requests to https://dormdish-api.onrender.com/api/* through React Native's native fetch from the WebView bridge. This can avoid a browser-WebView-only CORS/preflight failure while keeping requests restricted to the single DormDish API host and /api paths.
+- Returns a readable network error in the login UI if the native request cannot reach the API, instead of hiding the actual network failure behind a generic fetch error.
+- Keeps the website URL pointed at the Render Static Site; it does not alter Vite or Render environment values.
+- Disables WebView pinch zoom and native zoom controls for a more app-like experience.
+- Injects a mobile-only CSS rule for 16px form controls so iOS does not automatically zoom into small login inputs when they receive focus.
+- Preserves the home-page fallback for a stale/internal 404 route.
 
 Apply:
-1. Extract this ZIP into the DormDish project root, preserving folders and overwriting mobile/App.js.
+1. Extract the ZIP into E:\DormDishMobile, keeping folders intact and overwriting mobile\App.js.
 2. In PowerShell:
 
    cd E:\DormDishMobile\mobile
@@ -21,7 +20,6 @@ Apply:
    npx expo install --fix
    npx expo start --clear
 
-3. Open the new QR code in Expo Go. Make sure you run Expo from the mobile folder, not the project root.
+3. Open the new QR code with Expo Go and test login.
 
-Expo uses the hosted website inside a WebView. The startup URL is the website root:
-  https://dormdishmobile-static.onrender.com/
+No Render settings, website source files, CORS environment variables, Vite configuration, backend files, or Neon database are changed by this patch. The bridge handles only requests to https://dormdish-api.onrender.com/api/; other web requests continue to use the normal WebView fetch.

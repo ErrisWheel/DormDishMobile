@@ -14,10 +14,8 @@ import {
 import { WebView } from 'react-native-webview';
 
 const DEFAULT_WEBSITE_URL = 'https://dormdishmobile-static.onrender.com/';
+const API_ORIGIN = 'https://dormdish-api.onrender.com';
 
-// Avoid relying on the WHATWG URL global in the native JavaScript runtime.
-// Some Hermes/runtime combinations can fail here and accidentally block every
-// WebView navigation through onShouldStartLoadWithRequest.
 function getOrigin(value) {
   const match = String(value || '').trim().match(/^(https?:\/\/[^/?#]+)/i);
   return match ? match[1].replace(/\/+$/, '').toLowerCase() : '';
@@ -25,13 +23,8 @@ function getOrigin(value) {
 
 function normalizeWebsiteUrl(value) {
   const origin = getOrigin(value);
-  // A common configuration mistake is using the backend/API URL as the website.
-  // For this project, the Expo shell must render the Static Site, not the API.
-  if (!origin || origin === 'https://dormdish-api.onrender.com') {
-    return DEFAULT_WEBSITE_URL;
-  }
-  // Always start at the origin root. Do not start inside a stale /api or
-  // client-side route path inherited from a local .env file.
+  // Expo must load the frontend host, never the API host or a stale deep link.
+  if (!origin || origin === API_ORIGIN) return DEFAULT_WEBSITE_URL;
   return `${origin}/`;
 }
 
@@ -51,6 +44,120 @@ const BG = '#f7f8f5';
 const TEXT = '#24251f';
 const MUTED = '#85877f';
 const ACCENT = '#e84335';
+
+// Runs within the remote page. API fetches are delegated to React Native's
+// network stack so a WebView-specific browser CORS/preflight failure cannot
+// prevent the app from reaching its own API. Requests are restricted to the
+// single known HTTPS API origin and /api/ path.
+const INJECTED_APP_SCRIPT = String.raw`
+(function () {
+  try {
+    var viewport = document.querySelector('meta[name="viewport"]');
+    if (!viewport) {
+      viewport = document.createElement('meta');
+      viewport.setAttribute('name', 'viewport');
+      (document.head || document.documentElement).appendChild(viewport);
+    }
+    viewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+
+    if (!document.getElementById('dormdish-expo-mobile-behavior')) {
+      var style = document.createElement('style');
+      style.id = 'dormdish-expo-mobile-behavior';
+      style.textContent = [
+        'html { -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }',
+        '@media (max-width: 850px) {',
+        ' input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]), textarea, select { font-size: 16px !important; }',
+        '}'
+      ].join('\n');
+      (document.head || document.documentElement).appendChild(style);
+    }
+
+    if (window.__dormdishNativeFetchInstalled) return true;
+    if (!window.ReactNativeWebView || typeof window.ReactNativeWebView.postMessage !== 'function') return true;
+
+    var originalFetch = window.fetch.bind(window);
+    var pending = Object.create(null);
+    window.__dormdishNativeFetchInstalled = true;
+    window.__dormdishResolveNativeFetch = function (result) {
+      var entry = pending[result && result.id];
+      if (!entry) return;
+      delete pending[result.id];
+      clearTimeout(entry.timeout);
+      try {
+        if (result && result.transportError) {
+          entry.resolve(new Response(JSON.stringify({ error: result.transportError }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+          return;
+        }
+        var status = Number(result.status || 200);
+        var responseBody = (status === 204 || status === 205 || status === 304) ? null : String(result.body || '');
+        entry.resolve(new Response(responseBody, {
+          status: status,
+          headers: { 'Content-Type': String((result.headers && result.headers['content-type']) || 'application/json') }
+        }));
+      } catch (error) {
+        entry.resolve(new Response(JSON.stringify({ error: 'Could not process the DormDish API response: ' + String(error && error.message || error) }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+    };
+
+    window.fetch = function (input, init) {
+      var requestUrl = typeof input === 'string' ? input : (input && input.url) || '';
+      if (requestUrl.indexOf('https://dormdish-api.onrender.com/api/') !== 0) {
+        return originalFetch(input, init);
+      }
+
+      var requestOptions = init || {};
+      var method = String(requestOptions.method || 'GET').toUpperCase();
+      var requestHeaders = {};
+      var rawHeaders = requestOptions.headers || {};
+      if (rawHeaders && typeof rawHeaders.forEach === 'function') {
+        rawHeaders.forEach(function (value, key) { requestHeaders[String(key)] = String(value); });
+      } else {
+        Object.keys(rawHeaders).forEach(function (key) { requestHeaders[key] = String(rawHeaders[key]); });
+      }
+
+      var id = 'dd_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
+      return new Promise(function (resolve) {
+        var timeout = setTimeout(function () {
+          delete pending[id];
+          resolve(new Response(JSON.stringify({ error: 'DormDish API request timed out after 60 seconds. Check whether the Render API service is awake and healthy.' }), {
+            status: 504,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }, 60000);
+
+        pending[id] = { resolve: resolve, timeout: timeout };
+        try {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'DORMDISH_NATIVE_API_FETCH',
+            id: id,
+            url: requestUrl,
+            method: method,
+            headers: requestHeaders,
+            body: typeof requestOptions.body === 'string' ? requestOptions.body : null
+          }));
+        } catch (error) {
+          clearTimeout(timeout);
+          delete pending[id];
+          resolve(new Response(JSON.stringify({ error: 'Could not hand the API request to the app: ' + String(error && error.message || error) }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+      });
+    };
+  } catch (error) {
+    // Never stop the hosted website from rendering if an injection feature fails.
+  }
+  return true;
+})();
+true;
+`;
 
 export default function App() {
   const webview = useRef(null);
@@ -86,9 +193,6 @@ export default function App() {
 
     const targetOrigin = getOrigin(target);
     if (targetOrigin && targetOrigin === WEBSITE_ORIGIN) return true;
-
-    // Open external URLs / phone / email links outside the app, but never block
-    // same-site website navigation because URL parsing failed in the native VM.
     if (/^(https?:\/\/|mailto:|tel:)/i.test(target)) {
       Linking.openURL(target).catch(() => {});
     }
@@ -98,6 +202,54 @@ export default function App() {
   const openExternalWindow = useCallback((event) => {
     const target = event?.nativeEvent?.targetUrl;
     if (target) Linking.openURL(target).catch(() => {});
+  }, []);
+
+  const handleWebViewMessage = useCallback(async (event) => {
+    let message;
+    try {
+      message = JSON.parse(event?.nativeEvent?.data || '{}');
+    } catch {
+      return;
+    }
+    if (message?.type !== 'DORMDISH_NATIVE_API_FETCH' || typeof message.id !== 'string') return;
+
+    const targetUrl = String(message.url || '');
+    const method = String(message.method || 'GET').toUpperCase();
+    const targetPath = getPathname(targetUrl);
+    const responsePayload = { id: message.id };
+
+    // Never allow the WebView bridge to become an arbitrary native HTTP proxy.
+    if (getOrigin(targetUrl) !== API_ORIGIN || !targetPath.startsWith('/api/') ||
+        !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method)) {
+      responsePayload.status = 403;
+      responsePayload.body = JSON.stringify({ error: 'The app blocked an API request outside the approved DormDish API.' });
+      responsePayload.headers = { 'content-type': 'application/json' };
+    } else {
+      try {
+        const sourceHeaders = message.headers && typeof message.headers === 'object' ? message.headers : {};
+        const safeHeaders = {};
+        Object.keys(sourceHeaders).forEach((key) => {
+          if (/^(accept|authorization|content-type)$/i.test(key)) safeHeaders[key] = String(sourceHeaders[key]);
+        });
+
+        const requestInit = { method, headers: safeHeaders };
+        if (message.body != null && !['GET', 'HEAD'].includes(method)) requestInit.body = String(message.body);
+        const response = await fetch(targetUrl, requestInit);
+        responsePayload.status = response.status;
+        responsePayload.body = await response.text();
+        responsePayload.headers = { 'content-type': response.headers.get('content-type') || 'application/json' };
+      } catch (error) {
+        responsePayload.status = 503;
+        responsePayload.transportError = `The app could not reach ${API_ORIGIN}. Render may be waking up or the API service may be unavailable. Native network error: ${String(error?.message || error)}`;
+      }
+    }
+
+    if (webview.current) {
+      const serialized = JSON.stringify(responsePayload);
+      webview.current.injectJavaScript(
+        `if (window.__dormdishResolveNativeFetch) { window.__dormdishResolveNativeFetch(${serialized}); } true;`
+      );
+    }
   }, []);
 
   if (!/^https?:\/\//i.test(WEBSITE_URL)) {
@@ -125,6 +277,13 @@ export default function App() {
       thirdPartyCookiesEnabled
       allowsBackForwardNavigationGestures
       setSupportMultipleWindows={false}
+      setBuiltInZoomControls={false}
+      setDisplayZoomControls={false}
+      scalesPageToFit={false}
+      textZoom={100}
+      injectedJavaScriptBeforeContentLoaded={INJECTED_APP_SCRIPT}
+      injectedJavaScript={INJECTED_APP_SCRIPT}
+      onMessage={handleWebViewMessage}
       startInLoadingState={false}
       cacheEnabled={false}
       onShouldStartLoadWithRequest={shouldStartLoad}
@@ -145,8 +304,6 @@ export default function App() {
         const failedUrl = String(nativeEvent.url || '');
         const isMainFrame = nativeEvent.isForMainFrame !== false;
 
-        // If the web server returns a real 404 for an in-site route, return to
-        // the known-good root once instead of leaving the Expo shell on Not Found.
         if (isMainFrame && status === 404 && getOrigin(failedUrl) === WEBSITE_ORIGIN) {
           const pathname = getPathname(failedUrl);
           if (pathname !== '/' && failedUrl !== recovered404Url.current) {
@@ -157,7 +314,6 @@ export default function App() {
             return;
           }
         }
-
         if (isMainFrame && status >= 400) {
           setLoading(false);
           setLoadError(`DormDish returned HTTP ${status}. The app tried its home page if this was a route error; reload after checking the hosted site.`);
