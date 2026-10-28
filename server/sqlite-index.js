@@ -179,11 +179,19 @@ function logTracking(orderId, updatedBy, status, note, locationLabel, etaAt) {
     `).run(orderId, updatedBy, status, note, locationLabel || '', etaAt || null, new Date().toISOString());
 }
 
+const API_BUILD = 'dormdish-login-route-fix-2026-10-29';
 app.get('/api/health', (req, res) => {
-    res.json({ ok: true, database: 'sqlite', timestamp: new Date().toISOString() });
+    res.json({
+        ok: true,
+        database: 'sqlite',
+        service: 'dormdish-api',
+        build: API_BUILD,
+        loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
+        timestamp: new Date().toISOString()
+    });
 });
 
-app.post('/api/auth/login', (req, res) => {
+const loginHandler = (req, res) => {
     const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body.password === 'string' ? req.body.password : '';
 
@@ -198,7 +206,9 @@ app.post('/api/auth/login', (req, res) => {
     }
 
     res.json({ token: createToken(user), user: cleanUser(user) });
-});
+};
+app.post('/api/auth/login', loginHandler);
+app.post('/auth/login', loginHandler);
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
     res.json({ user: req.user });
@@ -1079,6 +1089,18 @@ registerGroupOrderRoutes(app, {
     getOrderDetails,
     calculateOrderDiscounts,
     logTracking
+});
+
+// Return JSON for unmatched API paths instead of Express's default HTML 404.
+app.use((req, res, next) => {
+    if (/^\/(?:api|auth)(?:\/|$)/.test(req.path)) {
+        return res.status(404).json({
+            error: `API route not found: ${req.method} ${req.path}`,
+            service: 'dormdish-api',
+            build: API_BUILD
+        });
+    }
+    return next();
 });
 
 app.use((error, req, res, next) => {

@@ -38,35 +38,14 @@ const allowedRoles = new Set(['superadmin', 'store_manager', 'customer', 'rider'
 const roleOrder = "CASE role WHEN 'superadmin' THEN 0 WHEN 'store_manager' THEN 1 WHEN 'rider' THEN 2 ELSE 3 END";
 const allowedSettings = new Set(['app_name', 'delivery_fee', 'default_eta_minutes', 'campus_location', 'student_discount_percent', 'group_discount_percent', 'group_discount_min_members', 'group_discount_min_subtotal']);
 
-function normalizeOrigin(value) {
-  const input = String(value || '').trim();
-  if (!input) return '';
-  try {
-    // CORS compares origins, not full URLs. URL.origin removes trailing paths, slashes, and query strings.
-    return new URL(input).origin;
-  } catch {
-    return input.split(/[/?#]/, 1)[0].replace(/\/+$/, '');
-  }
-}
-
-const configuredOrigins = (process.env.CORS_ORIGIN || '')
-  .split(',')
-  .map(normalizeOrigin)
-  .filter(Boolean);
-const corsOptions = {
+const configuredOrigins = (process.env.CORS_ORIGIN || '').split(',').map((x) => x.trim()).filter(Boolean);
+app.use(cors({
   origin(origin, callback) {
-    const requestOrigin = normalizeOrigin(origin);
-    if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes(requestOrigin)) {
-      return callback(null, true);
-    }
-    return callback(new Error(`Origin is not allowed by CORS: ${requestOrigin}`));
+    if (!origin || configuredOrigins.length === 0 || configuredOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS.'));
   },
-  credentials: true,
-  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 204
-};
-app.use(cors(corsOptions));
+  credentials: true
+}));
 app.use(express.json({ limit: '8mb' }));
 
 const run = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -269,18 +248,30 @@ async function requireManagerOrder(req,res,order) {
 }
 
 // Health and authentication.
+const API_BUILD = 'dormdish-login-route-fix-2026-10-29';
 app.get('/api/health', run(async (_req,res) => {
   await query('SELECT 1');
-  res.json({ ok: true, database: 'postgresql', timestamp: nowIso() });
+  res.json({
+    ok: true,
+    database: 'postgresql',
+    service: 'dormdish-api',
+    build: API_BUILD,
+    loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
+    timestamp: nowIso()
+  });
 }));
-app.post('/api/auth/login', run(async (req,res) => {
+
+// Register both the normal API path and the path used if a proxy strips /api.
+const loginHandler = run(async (req,res) => {
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
   if (!email || !password) return res.status(400).json({ error: 'Enter your email and password.' });
   const user = await one('SELECT * FROM users WHERE lower(email)=$1', [email]);
   if (!user || !Number(user.is_active) || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ error: 'Email or password is incorrect.' });
   res.json({ token: tokenFor(user), user: cleanUser(user) });
-}));
+});
+app.post('/api/auth/login', loginHandler);
+app.post('/auth/login', loginHandler);
 app.get('/api/auth/me', auth, run(async (req,res) => res.json({ user: req.user })));
 app.patch('/api/auth/profile', auth, role('customer'), run(async (req,res) => {
   const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
@@ -539,6 +530,17 @@ app.post('/api/group-orders/:id/checkout',auth,role('customer'),run(async(req,re
 app.post('/api/group-orders/:id/leave',auth,role('customer'),run(async(req,res)=>{const g=await one("SELECT * FROM group_orders WHERE id=$1 AND status='OPEN'",[req.params.id]);if(!g)return res.status(404).json({error:'This group order is closed.'});if(!await assertGroupMember(g.id,req.user.id))return res.status(403).json({error:'You are not a member of this group order.'});if(Number(g.host_customer_id)===Number(req.user.id))return res.status(400).json({error:'The host must cancel the group instead of leaving it.'});await query('DELETE FROM group_order_items WHERE group_order_id=$1 AND customer_id=$2',[g.id,req.user.id]);await query('DELETE FROM group_order_members WHERE group_order_id=$1 AND customer_id=$2',[g.id,req.user.id]);await query('UPDATE group_orders SET updated_at=$1 WHERE id=$2',[nowIso(),g.id]);res.json({success:true});}));
 app.delete('/api/group-orders/:id',auth,role('customer'),run(async(req,res)=>{const g=await one("SELECT * FROM group_orders WHERE id=$1 AND status='OPEN'",[req.params.id]);if(!g)return res.status(404).json({error:'This group order is closed.'});if(Number(g.host_customer_id)!==Number(req.user.id))return res.status(403).json({error:'Only the group host can cancel this group order.'});await query("UPDATE group_orders SET status='CANCELLED',updated_at=$1 WHERE id=$2",[nowIso(),g.id]);res.json({success:true});}));
 
+// Return JSON for unmatched API paths instead of Express's default HTML 404.
+app.use((req,res,next)=>{
+  if (/^\/(?:api|auth)(?:\/|$)/.test(req.path)) {
+    return res.status(404).json({
+      error: `API route not found: ${req.method} ${req.path}`,
+      service: 'dormdish-api',
+      build: API_BUILD
+    });
+  }
+  return next();
+});
 app.use((err,_req,res,_next)=>{if(res.headersSent)return;console.error(err);if(err.code==='23505')return res.status(409).json({error:'That record already exists.'});res.status(500).json({error:'Unexpected server error. Check the Render logs for details.'});});
 
 try {
