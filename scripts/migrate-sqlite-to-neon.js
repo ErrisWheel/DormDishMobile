@@ -8,9 +8,10 @@ import { Pool } from 'pg';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePath = process.env.DORMDISH_DB_PATH || path.join(root, 'server', 'data', 'dormdish.sqlite');
 const connectionString = process.env.DATABASE_URL;
+const publicApiBase = String(process.env.PUBLIC_API_URL || '').trim().replace(/\/+$/, '');
 const tables = [
   'stores', 'users', 'products', 'orders', 'order_items', 'tracking_updates',
-  'ratings', 'app_settings', 'group_orders', 'group_order_members',
+  'ratings', 'app_settings', 'product_images', 'group_orders', 'group_order_members',
   'group_order_items', 'rider_job_declines'
 ];
 
@@ -49,7 +50,16 @@ try {
       if (!columns.length) continue;
       const rows = sqlite.prepare(`SELECT ${columns.map((c) => `"${c}"`).join(',')} FROM "${table}"`).all();
       for (const row of rows) {
-        const values = columns.map((column) => row[column] === undefined ? null : row[column]);
+        const values = columns.map((column) => {
+          let value = row[column] === undefined ? null : row[column];
+          // If an image was uploaded during local SQLite development, rewrite its local API URL
+          // to the planned public API URL so it remains accessible after importing into Neon.
+          if (table === 'products' && column === 'image_url' && typeof value === 'string' && publicApiBase) {
+            const match = value.match(/\/product-images\/([0-9a-f-]{36})(?:[?#].*)?$/i);
+            if (match) value = `${publicApiBase}/product-images/${match[1]}`;
+          }
+          return value;
+        });
         const placeholders = values.map((_, index) => `$${index + 1}`).join(',');
         const quotedColumns = columns.map((c) => `"${c}"`).join(',');
         await client.query(`INSERT INTO "${table}" (${quotedColumns}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`, values);

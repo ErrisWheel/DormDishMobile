@@ -19,6 +19,6 @@ Updated files:
 IMPORTANT:
 - This archive does not include node_modules, package-lock.json, your local SQLite DB, or production secrets.
 - Run `npm install` in the project root after applying this patch so the PostgreSQL dependency is installed and package-lock.json is refreshed.
-- For local development leave DATABASE_URL blank to keep using SQLite.
+- For local development leave DATABASE_URL blank to keep using SQLite. Uploaded product photos are stored as SQLite BLOBs locally and PostgreSQL BYTEA in Neon.
 - The Neon migration script requires your actual local SQLite file and an empty target Neon database/branch. Back up the database first.
-- Read SETUP-HOSTING.md before deploying. Full Vite build and test suite were not verified in the patch-authoring environment because its preinstalled dependencies were incomplete and package registry access was unavailable. Changed JS syntax and JSON config files were checked.
+- Read SETUP-HOSTING.md before deploying. JavaScript syntax and JSON config files were checked. The full Vite build and complete test suite could not finish in this environment because the provided node_modules directory is missing `dotenv` and Rollup native optional dependencies; run `npm install` locally before testing.

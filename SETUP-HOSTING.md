@@ -1,6 +1,6 @@
 # DormDish setup (Windows + VS Code)
 
-This patch keeps the existing Vite website, keeps SQLite for local development/tests, and adds a PostgreSQL path for Render + Neon. The Expo app is in `mobile/` and uses the same hosted API. Product image upload requires Cloudinary.
+This patch keeps the existing Vite website, keeps SQLite for local development/tests, and adds a PostgreSQL path for Render + Neon. The Expo app is in `mobile/` and uses the same hosted API. Manager-uploaded product photos are stored as binary data in PostgreSQL on Neon (and as BLOBs in local SQLite mode).
 
 ## 1. Apply the patch
 
@@ -21,7 +21,7 @@ This patch keeps the existing Vite website, keeps SQLite for local development/t
 
 1. Open your existing Neon project and copy its **pooled** PostgreSQL connection string from the Connect screen. Keep the username/password in a secret environment variable; do not put it in frontend variables.
 2. Back up the current local SQLite database before migration. The default path is `server/data/dormdish.sqlite`; if your local DB is somewhere else, set `DORMDISH_DB_PATH` in `.env`.
-3. If you need to preserve current local data, point `DATABASE_URL` in `.env` at an empty Neon database/branch, then run:
+3. If you need to preserve current local data, point `DATABASE_URL` in `.env` at an empty Neon database/branch, set `PUBLIC_API_URL` to the intended production API base URL, then run:
 
    ```powershell
    npm run migrate:neon
@@ -40,10 +40,10 @@ This patch keeps the existing Vite website, keeps SQLite for local development/t
    - `NODE_ENV` = `production`
    - `DATABASE_URL` = your Neon pooled connection string
    - `JWT_SECRET` = a new, strong random secret (different from local)
-   - `CORS_ORIGIN` = the exact Render website URL, e.g. `https://dormdish-web.onrender.com`
-   - `INITIAL_ADMIN_NAME`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` = the first admin details **only when migrating into a database without an existing active superadmin**. Use a unique email and a password of at least 12 characters.
-   - `SEED_SAMPLE_DATA` = `true` only if you want the three sample stores/products on a brand-new database. Leave it `false` for production data import.
-   - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` = Cloudinary values if enabling manager photo uploads.
+   - `CORS_ORIGIN` = the exact Render website URL, e.g. `https://dormdish-web.onrender.com`. Create the Static Site first (or copy its assigned URL), then use that exact origin here; do not leave this blank in production.
+   - `INITIAL_ADMIN_NAME`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` = the first admin details if Neon has no active superadmin. Use an email you control and a password of at least 12 characters. Avoid demo credentials in production.
+   - `SEED_SAMPLE_DATA` = `true` for a brand-new, empty Neon database if you want sample stores/products; set it to `false` if importing your existing SQLite data. Do not seed into the same database you plan to migrate into.
+   - `PUBLIC_API_URL` = the full public API base URL, including `/api` (for example `https://dormdish-api.onrender.com/api`). After naming the backend service, copy its actual Render URL here. This is used to build stable product-image URLs.
 
 5. Deploy. Open `https://YOUR-API.onrender.com/api/health`; it should return `ok: true` and `database: "postgresql"`.
 
@@ -58,7 +58,7 @@ This patch keeps the existing Vite website, keeps SQLite for local development/t
 
 ## 5. Expo mobile app (Android + iOS)
 
-The Expo project is separate from the existing Vite website and existing Capacitor Android project: `mobile/`. It signs in and loads data through the same API. The starter targets stable Expo SDK 57 so the Expo Go app available during setup is more likely to match; use `npx expo install --fix` if Expo reports version drift.
+The Expo project is separate from the existing Vite website and existing Capacitor Android project: `mobile/`. It signs in and loads data through the same API. The mobile project targets Expo SDK 58 to match the Expo Go version shown in your iPhone screenshot. Expo requires the project SDK to match Expo Go; see https://docs.expo.dev/troubleshooting/expo-go-version-mismatch/.
 
 1. Open a second VS Code window with the `mobile` folder.
 2. Copy `mobile/.env.example` to `mobile/.env` and replace the example with your real API URL: `EXPO_PUBLIC_API_URL=https://YOUR-API.onrender.com/api` and `EXPO_PUBLIC_WEBSITE_URL=https://YOUR-WEBSITE.onrender.com`. The second variable resolves existing `/images/...` assets for the native app. For local Android emulator testing use API `http://10.0.2.2:4000/api` and website `http://10.0.2.2:5173`; for an iOS simulator on a Mac use API `http://localhost:4000/api` and website `http://localhost:5173`. A physical iPhone on another network should use the deployed Render URLs.
@@ -66,19 +66,20 @@ The Expo project is separate from the existing Vite website and existing Capacit
 
    ```powershell
    npm install
-   npx expo install --check
-   npx expo start
+   npx expo install --fix
+   npx expo-doctor
+   npx expo start --clear
    ```
 
 4. Use Android Studio's emulator for Android testing. To generate/open native Android project files when needed, run `npx expo prebuild --platform android`, then open `mobile/android` in Android Studio. The existing root-level `android/` folder belongs to the previous Capacitor app; do not confuse the two.
 5. For iOS cloud builds from Windows, install EAS CLI with `npm install -g eas-cli`, sign in using `eas login`, then from `mobile/` run `eas build:configure` and `eas build --platform ios`. Follow EAS prompts to create/sign with Apple credentials. Set both `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_WEBSITE_URL` in the EAS environment/build profile too; mobile `EXPO_PUBLIC_*` variables are embedded at build time.
 6. For an App Store release, you will need the appropriate Apple Developer Program membership. An iOS build file is not the same as having an App Store-published app. Without an iPhone or Mac, use EAS's remote build and available remote simulation/testing options; you may still need an iPhone/TestFlight tester to verify real-device behavior.
 
-## 6. Cloudinary product images
+## 6. Product-photo storage in Neon
 
-1. Create/open a Cloudinary account and find the cloud name, API key, and API secret.
-2. Add these three environment variables to the **Render API web service only**.
-3. Redeploy the API. Sign in to the website as a store manager, open Products, choose a JPG/PNG/WEBP/AVIF image under 5 MB, upload it, then save the product. The image URL is stored in PostgreSQL; image files are hosted by Cloudinary, not Neon or Render's temporary filesystem.
+1. Set `PUBLIC_API_URL` on the Render API service to `https://YOUR-API.onrender.com/api` after Render gives you the real API URL.
+2. Redeploy the API. Sign in as a store manager, open Products, choose a JPG/PNG/WEBP/AVIF image under 5 MB, upload it, then save the product.
+3. The photo bytes are saved in the PostgreSQL `product_images.image_data` BYTEA column in Neon. `products.image_url` stores the public API URL used to retrieve those bytes. No Cloudinary account is needed. The current sample/legacy photos referenced as `/images/...` remain static website assets; newly uploaded product photos are stored inside Neon.
 
 ## 7. Verification before submitting
 
@@ -94,6 +95,6 @@ Then verify sign-in, product edit/upload, customer checkout, manager status prog
 ## Notes and limitations
 
 - If `DATABASE_URL` is set in the root `.env`, `npm run server` uses Neon. Leave it blank to use the existing local SQLite mode.
-- Keep secrets server-only. Do not expose `DATABASE_URL`, `JWT_SECRET`, or Cloudinary API secret via `VITE_*` or `EXPO_PUBLIC_*` variables.
+- Keep secrets server-only. Do not expose `DATABASE_URL` or `JWT_SECRET` via `VITE_*` or `EXPO_PUBLIC_*` variables.
 - The initial Expo app has customer browsing/checkout/orders, rider availability/job flow, manager product/order basics, and admin listings. The existing website remains the full management experience; mobile role screens are an additional native frontend and will need visual/functional parity review before public release.
 - Existing local data is not included in the source ZIP because the SQLite database is local/ignored. Copy your actual `server/data/dormdish.sqlite` into your local project before migrating if you need those real records.

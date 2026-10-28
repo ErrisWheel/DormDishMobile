@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS products (
   is_available SMALLINT NOT NULL DEFAULT 1 CHECK (is_available IN (0,1)),
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS product_images (
+  id UUID PRIMARY KEY,
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg','image/png','image/webp','image/avif')),
+  file_name TEXT NOT NULL DEFAULT 'product-image',
+  image_data BYTEA NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   customer_id BIGINT NOT NULL REFERENCES users(id),

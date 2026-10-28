@@ -18,6 +18,7 @@ import { allowRoles, createToken, requireAuth } from './auth.js';
 initializeDatabase();
 
 const app = express();
+app.set('trust proxy', 1);
 const port = Number(process.env.PORT || 4000);
 const orderStatuses = ['Pending', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Delivered', 'Cancelled'];
 const nextStatuses = {
@@ -343,42 +344,35 @@ app.put('/api/products/:id', requireAuth, allowRoles('store_manager'), (req, res
     res.json({ product: getProduct(product.id) });
 });
 
-app.post('/api/uploads/products', requireAuth, allowRoles('store_manager'), async (req, res) => {
+app.get('/api/product-images/:id', (req, res) => {
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ error: 'Product image not found.' });
+    const image = db.prepare('SELECT mime_type, image_data FROM product_images WHERE id = ?').get(req.params.id);
+    if (!image) return res.status(404).json({ error: 'Product image not found.' });
+    res.set('Content-Type', image.mime_type);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.send(image.image_data);
+});
+
+app.post('/api/uploads/products', requireAuth, allowRoles('store_manager'), (req, res) => {
     const { filename, mimeType, data } = req.body || {};
-    const cloud = process.env.CLOUDINARY_CLOUD_NAME;
-    const key = process.env.CLOUDINARY_API_KEY;
-    const secret = process.env.CLOUDINARY_API_SECRET;
-    if (!cloud || !key || !secret) {
-        return res.status(503).json({ error: 'Image uploads are not configured yet. Add the Cloudinary environment variables to your backend.' });
-    }
-    if (typeof data !== 'string' || typeof mimeType !== 'string' || !['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(mimeType)) {
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
+    if (typeof data !== 'string' || typeof mimeType !== 'string' || !supportedTypes.includes(mimeType)) {
         return res.status(400).json({ error: 'Choose a JPG, PNG, WEBP, or AVIF image.' });
     }
-    const bytes = Buffer.from(data.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const base64 = data.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+    if (!base64 || base64.length > 7 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
+        return res.status(400).json({ error: 'Image must be smaller than 5 MB and use valid image data.' });
+    }
+    const bytes = Buffer.from(base64, 'base64');
     if (!bytes.length || bytes.length > 5 * 1024 * 1024) {
         return res.status(400).json({ error: 'Image must be smaller than 5 MB.' });
     }
-    try {
-        const timestamp = Math.floor(Date.now() / 1000);
-        const folder = 'dormdish/products';
-        const signature = crypto.createHash('sha1').update(`folder=${folder}&timestamp=${timestamp}${secret}`).digest('hex');
-        const form = new FormData();
-        form.append('file', new Blob([bytes], { type: mimeType }), String(filename || 'product-image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100));
-        form.append('api_key', key);
-        form.append('timestamp', String(timestamp));
-        form.append('folder', folder);
-        form.append('signature', signature);
-        const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloud)}/image/upload`, { method: 'POST', body: form });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || !result.secure_url) {
-            console.error('Cloudinary upload failed:', result.error?.message || response.statusText);
-            return res.status(502).json({ error: 'The image service could not upload this file. Check the Cloudinary settings and try again.' });
-        }
-        return res.status(201).json({ url: result.secure_url, publicId: result.public_id });
-    } catch (error) {
-        console.error('Cloudinary upload error:', error);
-        return res.status(502).json({ error: 'Could not upload the image. Check your connection and try again.' });
-    }
+    const id = crypto.randomUUID();
+    const safeName = String(filename || 'product-image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100) || 'product-image';
+    db.prepare('INSERT INTO product_images(id,mime_type,file_name,image_data,created_at) VALUES(?,?,?,?,?)').run(id, mimeType, safeName, bytes, new Date().toISOString());
+    const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+    return res.status(201).json({ url: `${apiBase}/product-images/${id}`, imageId: id, storage: 'sqlite' });
 });
 
 app.delete('/api/products/:id', requireAuth, allowRoles('store_manager'), (req, res) => {

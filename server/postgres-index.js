@@ -27,6 +27,7 @@ const pool = new Pool({
 pool.on('error', (error) => console.error('Unexpected idle PostgreSQL client error:', error));
 
 const app = express();
+app.set('trust proxy', 1);
 const statuses = ['Pending', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Delivered', 'Cancelled'];
 const nextStatuses = {
   Pending: ['Confirmed', 'Cancelled'], Confirmed: ['Preparing', 'Cancelled'],
@@ -314,30 +315,31 @@ app.delete('/api/products/:id', auth, role('store_manager'), run(async (req,res)
   res.json({ success: true });
 }));
 
-// Product image upload. Uses Cloudinary's signed upload endpoint without storing files on Render's ephemeral disk.
+// Public product-photo reads come directly from PostgreSQL BYTEA storage.
+app.get('/api/product-images/:id', run(async (req, res) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ error: 'Product image not found.' });
+  const image = await one('SELECT mime_type, image_data FROM product_images WHERE id=$1', [req.params.id]);
+  if (!image) return res.status(404).json({ error: 'Product image not found.' });
+  res.set('Content-Type', image.mime_type);
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.send(image.image_data);
+}));
+
+// Product photos are stored as binary data in Neon PostgreSQL, not on Render's ephemeral disk.
 app.post('/api/uploads/products', auth, role('store_manager'), run(async (req,res) => {
   const { filename, mimeType, data } = req.body || {};
-  const cloud = process.env.CLOUDINARY_CLOUD_NAME;
-  const key = process.env.CLOUDINARY_API_KEY;
-  const secret = process.env.CLOUDINARY_API_SECRET;
-  if (!cloud || !key || !secret) return res.status(503).json({ error: 'Image uploads are not configured yet. Add the Cloudinary environment variables on Render.' });
-  if (typeof data !== 'string' || typeof mimeType !== 'string' || !['image/jpeg','image/png','image/webp','image/avif'].includes(mimeType)) return res.status(400).json({ error: 'Choose a JPG, PNG, WEBP, or AVIF image.' });
-  const base64 = data.replace(/^data:[^;]+;base64,/, '');
+  const supportedTypes = ['image/jpeg','image/png','image/webp','image/avif'];
+  if (typeof data !== 'string' || typeof mimeType !== 'string' || !supportedTypes.includes(mimeType)) return res.status(400).json({ error: 'Choose a JPG, PNG, WEBP, or AVIF image.' });
+  const base64 = data.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+  if (!base64 || base64.length > 7 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return res.status(400).json({ error: 'Image must be smaller than 5 MB and use valid image data.' });
   const bytes = Buffer.from(base64, 'base64');
   if (!bytes.length || bytes.length > 5 * 1024 * 1024) return res.status(400).json({ error: 'Image must be smaller than 5 MB.' });
-  const timestamp = Math.floor(Date.now()/1000);
-  const folder = 'dormdish/products';
-  const signature = crypto.createHash('sha1').update(`folder=${folder}&timestamp=${timestamp}${secret}`).digest('hex');
-  const form = new FormData();
-  form.append('file', new Blob([bytes], { type: mimeType }), String(filename || 'product-image').replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,100));
-  form.append('api_key', key); form.append('timestamp', String(timestamp)); form.append('folder', folder); form.append('signature', signature);
-  const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloud)}/image/upload`, { method: 'POST', body: form });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.secure_url) {
-    console.error('Cloudinary upload rejected:', result.error?.message || response.statusText);
-    return res.status(502).json({ error: 'The image service could not upload this file. Check the Cloudinary settings and try again.' });
-  }
-  res.status(201).json({ url: result.secure_url, publicId: result.public_id });
+  const id = crypto.randomUUID();
+  const safeName = String(filename || 'product-image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0,100) || 'product-image';
+  await query('INSERT INTO product_images(id,mime_type,file_name,image_data,created_at) VALUES($1,$2,$3,$4,$5)', [id, mimeType, safeName, bytes, nowIso()]);
+  const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+  res.status(201).json({ url: `${apiBase}/product-images/${id}`, imageId: id, storage: 'postgresql' });
 }));
 
 // Customer orders, manager orders, and rider jobs.
