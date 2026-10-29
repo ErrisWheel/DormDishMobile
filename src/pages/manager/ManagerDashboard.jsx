@@ -3,6 +3,7 @@ import { Bike, Check, Clock3, Edit3, Package, Plus, RefreshCw, Star, Trash2, Tre
 import { apiRequest, formatDate, money } from '../../lib/api.js';
 import { ImageUploadField } from '../../components/ImageUploadField.jsx';
 import { MediaImage } from '../../components/MediaImage.jsx';
+import { orderStatusLabel } from '../../lib/order-status.js';
 
 const allowedNext = {
     Pending: ['Confirmed', 'Cancelled'],
@@ -78,7 +79,7 @@ function ManagerOrderCard({ order, onUpdate }) {
                     <h3>{order.customer_name}</h3>
                     <p>{order.store_name} · {formatDate(order.created_at)}</p>
                 </div>
-                <span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{order.status}</span>
+                <span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{orderStatusLabel(order.status)}</span>
             </div>
             <div className="role-order-items">
                 {order.items.map((item) => (
@@ -102,7 +103,7 @@ function ManagerOrderCard({ order, onUpdate }) {
                 <div className="form-grid">
                     <label>Status
                         <select value={status} onChange={(event) => setStatus(event.target.value)}>
-                            {options.map((option) => <option key={option} value={option}>{option}</option>)}
+                            {options.map((option) => <option key={option} value={option}>{orderStatusLabel(option)}</option>)}
                         </select>
                     </label>
                     <label>ETA from now (minutes)

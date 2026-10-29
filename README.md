@@ -1,6 +1,6 @@
 # DormDish Mobile
 
-DormDish is a React, Vite, Capacitor/Expo WebView, and Express app. It supports SQLite for local development and Neon PostgreSQL when `DATABASE_URL` is configured for Render. Production rider tracking uses the phone browser/WebView Geolocation API; email verification uses Nodemailer + SMTP. Payments remain demo-only and no money is processed.
+DormDish is a React, Vite, Capacitor, Express, and SQLite school-project demo. It runs locally without a hosted database, paid map API, real payment provider, or real GPS tracking. The web interface and Android app use the same local API.
 
 ## Project structure
 
@@ -78,17 +78,17 @@ All accounts use hashed passwords in SQLite. These are local classroom credentia
 | Customer | `customer@dormdish.test` | `Customer123!` | Customer account |
 | Delivery Rider | `rider@dormdish.test` | `Rider123!` | Store Alpha |
 
-The sign-in page includes buttons to autofill each demo account.
+Demo accounts remain available for classroom testing but are no longer displayed on the sign-in page. Staff accounts are created by a Super Admin.
 
 ## Implemented permissions and flows
 
 - Super Admin manages accounts, store registrations and manager assignments, delivery rider associations through user management, general settings, and rating visibility. Order APIs explicitly deny Super Admin access, and the product write APIs deny Super Admin access.
 - Store Managers only manage products, orders, ratings, riders, and tracking for their assigned store. Product create, edit, and delete endpoints only allow Store Managers.
 - Customers browse active stores ordered by database-calculated average rating, browse store products, order available stock, view their order history, follow ETA and tracking events, and rate a store after delivery.
-- Riders only see orders assigned to their rider account for their assigned store. Once they confirm physical pickup, the app reads their device GPS, writes shared coordinates to the backend, and the customer order map refreshes every few seconds while delivery is active. Only the assigned rider can finish the order, and the backend requires a delivery proof photo.
+- Riders only see orders assigned to their rider account for their assigned store. They can update simulated location/note information and mark an active delivery delivered.
 - Order placement and cancellation update stock in SQLite. Orders retain item snapshots so historic order information remains readable.
 - Store location links open Google Maps externally. Order confirmation, order history, and rider deliveries include a Store-to-delivery route link. Google Maps calculates the driving distance and travel time for the entered destination; no paid Maps API or fake GPS is used. Store Alpha uses the provided Maps link.
-- Rider GPS is device-derived and depends on location permission, network connectivity, and the app staying active. Customers see the last saved point and timestamp when live updates stop; location updates are not guaranteed while the app is closed or background-suspended. ETA remains an estimate.
+- ETA and tracking are estimates manually controlled by the Store Manager or permitted rider action. There is no GPS tracking or guarantee that an ETA is exact.
 - Payments are demo-only and no money is processed.
 
 ## Android emulator debugging
@@ -124,12 +124,7 @@ The reset command deletes the default local SQLite database files. The next API 
 
 ## Operational notes
 
-- The SQLite database is local to the machine running the API. In Render production, `DATABASE_URL` selects Neon PostgreSQL, where account, order, tracking, and uploaded image data are stored.
+- The SQLite database is local to the machine running the API. The Android app does not contain its own SQLite file; it sends API requests to the development computer.
 - The default store names, ratings, products, prices, and customer addresses are demo records and can be edited through the provided manager/admin screens.
 - `VITE_API_URL` can be left blank for Vite web development and Android emulator use. Vite proxies `/api` to the local API while developing on desktop.
 - The original frontend-only demo screens have been replaced by role-specific data-backed screens. Browser storage is still used only for cart, favorites, theme preference, and the customer's usual delivery address.
-
-
-## Render and Neon deployment
-
-See [FEATURES-DEPLOYMENT.md](FEATURES-DEPLOYMENT.md) for the exact Render environment variables, one-time demo-account provisioning, email verification setup, and the shared GPS/photo-proof flow. Do not put a Gmail app password in source code, `.env.example`, or GitHub.

@@ -13,6 +13,7 @@ import { AdminDashboard } from './pages/admin/AdminDashboard.jsx';
 import { RiderDashboard } from './pages/rider/RiderDashboard.jsx';
 import { VerificationPage } from './pages/VerificationPage.jsx';
 import { AccountProfilePage } from './pages/AccountProfilePage.jsx';
+import { SupportPage } from './pages/SupportPage.jsx';
 import { MediaImage } from './components/MediaImage.jsx';
 import './styles.css';
 import './role-styles.css';
@@ -167,7 +168,7 @@ function App() {
             setGroupOrder(groupResult.groupOrder);
         } catch (error) {
             if (error.status === 401) {
-                handleLogout();
+                handleLogout({ skipConfirm: true });
                 return;
             }
             notify(error.message);
@@ -199,7 +200,8 @@ function App() {
         notify(`Welcome, ${nextUser.name}.`);
     }
 
-    function handleLogout() {
+    function handleLogout({ skipConfirm = false } = {}) {
+        if (!skipConfirm && !window.confirm('Are you sure you want to log out?')) return;
         clearSession();
         setUser(null);
         setPage('customer-home');
@@ -546,7 +548,7 @@ function App() {
     }
 
     if (!user) {
-        return <div className={`app-shell ${dark ? 'dark' : ''}`}><LoginPage onLogin={handleLogin} dark={dark} onToggleDark={() => setDark((current) => !current)} /></div>;
+        return <div className={`app-shell ${dark ? 'dark' : ''}`}>{page === 'support' ? <SupportPage onBack={() => setPage('customer-home')} /> : <LoginPage onLogin={handleLogin} onSupport={() => setPage('support')} dark={dark} onToggleDark={() => setDark((current) => !current)} />}</div>;
     }
 
     const isCustomer = user.role === 'customer';
@@ -564,6 +566,7 @@ function App() {
                 <div className="top-actions">
                     <span className="role-chip">{roleLabel(user.role)}</span>
                     {!Number(user.email_verified) && <button className="secondary-button small-button verify-email-topbar" onClick={() => navigate('verify-account')}><MailCheck size={14} /> Verify email</button>}
+                    <button className="icon-button" onClick={() => navigate('support')} aria-label="Contact support" title="Contact support"><CircleHelp size={18} /></button>
                     {isCustomer && <button className="header-cart-button" onClick={() => navigate('customer-cart')}><ShoppingCart size={18} /><span>Cart</span>{cartCount > 0 && <b>{cartCount}</b>}</button>}
                     <button className="icon-button theme-toggle" onClick={() => setDark((current) => !current)} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
                     <button className="profile-chip" onClick={() => navigate(isCustomer ? 'customer-profile' : 'account-profile')}>
@@ -571,7 +574,7 @@ function App() {
                         <span className="avatar">{user.profile_image_url ? <MediaImage src={user.profile_image_url} alt="" className="avatar-media" fallbackText={user.name.trim().charAt(0).toUpperCase() || '?'} /> : user.name.trim().charAt(0).toUpperCase() || '?'}</span>
                         <span className="profile-chip-name">{user.name}</span>
                     </button>
-                    <button className="icon-button" onClick={handleLogout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
+                    <button className="icon-button" onClick={() => handleLogout()} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
                 </div>
             </header>
             <div className="layout">
@@ -635,6 +638,7 @@ function App() {
                         {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={setAddress} onSave={saveProfile} onVerify={() => navigate('verify-account')} orders={orders} favorites={favorites} />}
                         {!isCustomer && page === 'account-profile' && <AccountProfilePage user={user} onSave={saveProfile} onVerify={() => navigate('verify-account')} />}
                         {page === 'verify-account' && <VerificationPage user={user} onBack={() => navigate(getHomePage(user.role))} />}
+                        {page === 'support' && <SupportPage user={user} onBack={() => navigate(getHomePage(user.role))} />}
                         {isManager && page.startsWith('manager-') && <ManagerDashboard key={user.id} user={user} page={page} onToast={notify} />}
                         {isAdmin && page.startsWith('admin-') && <AdminDashboard key={user.id} page={page} onToast={notify} />}
                         {isRider && page === 'rider-dashboard' && <RiderDashboard onToast={notify} />}

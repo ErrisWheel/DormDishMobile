@@ -1,18 +1,9 @@
 import { useState } from 'react';
-import { ArrowRight, KeyRound, Moon, ShieldCheck, Sun, Utensils } from 'lucide-react';
+import { ArrowRight, Mail, Moon, ShieldCheck, Sun, Utensils } from 'lucide-react';
 import { apiRequest, saveSession } from '../lib/api.js';
 
-const demoAccounts = [
-    { label: 'Super Admin', email: 'superadmin@dormdish.test' },
-    { label: 'Store Manager Alpha', email: 'manager.alpha@dormdish.test' },
-    { label: 'Store Manager Beta', email: 'manager.beta@dormdish.test' },
-    { label: 'Store Manager Gamma', email: 'manager.gamma@dormdish.test' },
-    { label: 'Customer', email: 'customer@dormdish.test' },
-    { label: 'Delivery Rider', email: 'rider@dormdish.test' }
-];
-
-export function LoginPage({ onLogin, dark, onToggleDark }) {
-    const [email, setEmail] = useState('customer@dormdish.test');
+export function LoginPage({ onLogin, onSupport, dark, onToggleDark }) {
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -60,18 +51,10 @@ export function LoginPage({ onLogin, dark, onToggleDark }) {
                         <ArrowRight size={17} />
                     </button>
                 </form>
-                <div className="demo-access">
-                    <div className="demo-access-title"><KeyRound size={16} /><strong>School demo accounts</strong></div>
-                    <p>Select an email, then enter its password from the local demo credentials.</p>
-                    <div className="demo-account-grid">
-                        {demoAccounts.map((account) => (
-                            <button key={account.email} type="button" onClick={() => { setEmail(account.email); setPassword(''); setError(''); }}>
-                                {account.label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                <div className="auth-note"><ShieldCheck size={16} /><span>Passwords are stored as hashes. Demo accounts are for classroom testing only.</span></div>
+                <button className="secondary-button full-button auth-support-button" type="button" onClick={onSupport}>
+                    <Mail size={16} /> Contact support
+                </button>
+                <div className="auth-note"><ShieldCheck size={16} /><span>Your account is protected. Contact support if you need help signing in.</span></div>
             </section>
         </main>
     );

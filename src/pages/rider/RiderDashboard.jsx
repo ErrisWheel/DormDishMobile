@@ -4,6 +4,7 @@ import { apiRequest, formatDate, money, resolveImageUrl } from '../../lib/api.js
 import { deliveryDirectionsUrl, deliveryDestinationUrl, storeMapUrl } from '../../lib/maps.js';
 import { LiveRiderMap } from '../../components/LiveRiderMap.jsx';
 import { MediaImage } from '../../components/MediaImage.jsx';
+import { orderStatusLabel } from '../../lib/order-status.js';
 
 // Rider jobs
 function fileAsDataUrl(file) {
@@ -222,7 +223,7 @@ export function RiderDashboard({ onToast }) {
                     const canStart = order.status === 'Ready for Pickup';
                     const active = order.status === 'Out for Delivery';
                     return <article className="role-order-card rider-order-card" key={order.id}>
-                        <div className="role-order-header"><div><span className="order-number">{order.id}</span><h3>{order.customer_name}</h3><p>{order.store_name} · {formatDate(order.created_at)}</p></div><span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{order.status}</span></div>
+                        <div className="role-order-header"><div><span className="order-number">{order.id}</span><h3>{order.customer_name}</h3><p>{order.store_name} · {formatDate(order.created_at)}</p></div><span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{orderStatusLabel(order.status)}</span></div>
                         <div className="rider-delivery-summary"><div><span>Deliver to</span><strong>{order.delivery_address}</strong></div><div><span>Order total</span><strong>{money(order.total)}</strong></div><div><span>ETA</span><strong>{order.eta_at ? formatDate(order.eta_at) : 'Not set'}</strong></div></div>
                         <div className="rider-order-items">{order.items.map((item) => <span key={item.id}>{item.quantity} × {item.product_name}</span>)}</div>
                         <div className="rider-map-links"><a className="map-link" href={deliveryDirectionsUrl(order)} target="_blank" rel="noreferrer"><Navigation size={16} /> View route & distance</a><a className="map-link" href={storeMapUrl(order)} target="_blank" rel="noreferrer"><Store size={16} /> Open store location</a><a className="map-link" href={deliveryDestinationUrl(order.delivery_address)} target="_blank" rel="noreferrer"><MapPin size={16} /> Open destination</a></div>
@@ -234,7 +235,7 @@ export function RiderDashboard({ onToast }) {
             </section>
 
             {jobs.history.length > 0 && <section className="section-block"><div className="dashboard-section-heading"><div><h2>Delivery history</h2><p>Recently completed and cancelled jobs.</p></div></div><div className="order-list">{jobs.history.map((order) => <article className="role-order-card rider-order-card" key={order.id}>
-                <div className="role-order-header"><div><span className="order-number">{order.id}</span><h3>{order.customer_name}</h3><p>{order.store_name} · {formatDate(order.updated_at || order.created_at)}</p></div><span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{order.status}</span></div>
+                <div className="role-order-header"><div><span className="order-number">{order.id}</span><h3>{order.customer_name}</h3><p>{order.store_name} · {formatDate(order.updated_at || order.created_at)}</p></div><span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{orderStatusLabel(order.status)}</span></div>
                 {order.status === 'Delivered' ? <div className="rider-completed-note"><PackageCheck size={18} /><span>Delivery completed through the rider’s photo-proof flow.</span>{order.delivery_proof_url && <a href={resolveImageUrl(order.delivery_proof_url)} target="_blank" rel="noreferrer"><MediaImage src={order.delivery_proof_url} alt="Delivery proof" className="delivery-proof-media" fallbackText="View proof photo" fallbackSrc="" /></a>}</div> : <p className="muted-copy">This order was cancelled.</p>}
             </article>)}</div></section>}
             <input ref={cameraPhotoRef} className="visually-hidden-file-input" type="file" accept="image/*" capture="environment" onChange={(event) => void confirmDelivery(event.target.files?.[0])} />

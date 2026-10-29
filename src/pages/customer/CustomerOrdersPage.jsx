@@ -4,6 +4,7 @@ import { apiRequest, formatDate, money } from '../../lib/api.js';
 import { deliveryDirectionsUrl, deliveryDestinationUrl, storeMapUrl } from '../../lib/maps.js';
 import { LiveRiderMap } from '../../components/LiveRiderMap.jsx';
 import { MediaImage } from '../../components/MediaImage.jsx';
+import { orderStatusLabel } from '../../lib/order-status.js';
 
 const progressStatuses = ['Pending', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Delivered'];
 
@@ -57,7 +58,7 @@ export function CustomerOrdersPage({ orders, onRefresh, onBrowse, onToast }) {
                             <article className="role-order-card" key={order.id}>
                                 <div className="role-order-header">
                                     <div><span className="order-number">{order.id}</span><h3>{order.store_name}</h3><p>Placed {formatDate(order.created_at)}</p></div>
-                                    <span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{order.status}</span>
+                                    <span className={`status-pill status-${order.status.toLowerCase().replaceAll(' ', '-')}`}>{orderStatusLabel(order.status)}</span>
                                 </div>
 
                                 {order.group_order_id && <p className="muted-copy">Shared group order with classmates. Coordinate repayment with the group host.</p>}
@@ -100,7 +101,7 @@ export function CustomerOrdersPage({ orders, onRefresh, onBrowse, onToast }) {
                                             return (
                                                 <div className={`progress-step ${complete ? 'complete' : ''} ${status === order.status ? 'current' : ''}`} key={status}>
                                                     <span>{complete ? <CheckCircle2 size={16} /> : <i />}</span>
-                                                    <small>{status}</small>
+                                                    <small>{orderStatusLabel(status)}</small>
                                                 </div>
                                             );
                                         })}
@@ -112,7 +113,7 @@ export function CustomerOrdersPage({ orders, onRefresh, onBrowse, onToast }) {
                                     {order.tracking?.length ? order.tracking.slice(0, 4).map((update) => (
                                         <div className="tracking-event" key={update.id}>
                                             <span className="tracking-event-dot" />
-                                            <div><strong>{update.status}</strong><p>{update.note}{update.location_label ? ` · ${update.location_label}` : ''}</p><small>{formatDate(update.created_at)}{update.updated_by_name ? ` · ${update.updated_by_name}` : ''}</small></div>
+                                            <div><strong>{orderStatusLabel(update.status)}</strong><p>{update.note}{update.location_label ? ` · ${update.location_label}` : ''}</p><small>{formatDate(update.created_at)}{update.updated_by_name ? ` · ${update.updated_by_name}` : ''}</small></div>
                                         </div>
                                     )) : <p className="muted-copy">Tracking updates will appear here.</p>}
                                 </div>

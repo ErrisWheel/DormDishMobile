@@ -19,6 +19,10 @@ const childEnvironment = {
     DATABASE_URL: '',
     SMTP_USER: '',
     SMTP_PASS: '',
+    DEMO_SUPERADMIN_PASSWORD: process.env.DEMO_SUPERADMIN_PASSWORD || 'Admin123!',
+    DEMO_MANAGER_PASSWORD: process.env.DEMO_MANAGER_PASSWORD || 'Manager123!',
+    DEMO_CUSTOMER_PASSWORD: process.env.DEMO_CUSTOMER_PASSWORD || 'Customer123!',
+    DEMO_RIDER_PASSWORD: process.env.DEMO_RIDER_PASSWORD || 'Rider123!',
     JWT_SECRET: 'automated-test-secret-value-with-over-24-characters',
     DORMDISH_DB_PATH: databasePath
 };
@@ -79,11 +83,11 @@ before(async () => {
     }
 
     assert.equal(ready, true, 'API should become ready');
-    customerToken = await login('customer@dormdish.test', process.env.DEMO_CUSTOMER_PASSWORD);
-    alphaManagerToken = await login('manager.alpha@dormdish.test', process.env.DEMO_MANAGER_PASSWORD);
-    betaManagerToken = await login('manager.beta@dormdish.test', process.env.DEMO_MANAGER_PASSWORD);
-    superadminToken = await login('superadmin@dormdish.test', process.env.DEMO_SUPERADMIN_PASSWORD);
-    riderToken = await login('rider@dormdish.test', process.env.DEMO_RIDER_PASSWORD);
+    customerToken = await login('customer@dormdish.test', childEnvironment.DEMO_CUSTOMER_PASSWORD);
+    alphaManagerToken = await login('manager.alpha@dormdish.test', childEnvironment.DEMO_MANAGER_PASSWORD);
+    betaManagerToken = await login('manager.beta@dormdish.test', childEnvironment.DEMO_MANAGER_PASSWORD);
+    superadminToken = await login('superadmin@dormdish.test', childEnvironment.DEMO_SUPERADMIN_PASSWORD);
+    riderToken = await login('rider@dormdish.test', childEnvironment.DEMO_RIDER_PASSWORD);
     const betaProducts = await request('/products?storeId=2');
     const alphaProducts = await request('/products?storeId=1');
     betaProductId = betaProducts.body.products[0].id;
@@ -263,4 +267,32 @@ test('customer order lifecycle persists ETA, tracking, and store rating', async 
     assert.equal(orderDetails.status, 200);
     assert.equal(orderDetails.body.order.rating.score, 5);
     assert.ok(orderDetails.body.order.tracking.length >= 6);
+});
+
+
+test('public support form validates required contact fields', async () => {
+    const result = await request('/support', {
+        method: 'POST',
+        body: { name: 'A Student', contactNumber: '', email: 'student@example.com', message: 'I need help with my order.' }
+    });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /contact number/i);
+});
+
+test('support form reports missing SMTP configuration instead of pretending to send', async () => {
+    const result = await request('/support', {
+        method: 'POST',
+        body: { name: 'A Student', contactNumber: '09123456789', email: 'student@example.com', message: 'I need help with my order.' }
+    });
+    assert.equal(result.status, 503);
+    assert.match(result.body.error, /SMTP_USER or SMTP_PASS/i);
+});
+
+test('admin cannot create customer accounts through staff account creation', async () => {
+    const result = await request('/admin/users', {
+        method: 'POST',
+        body: { name: 'Blocked Customer', email: 'blocked-customer@example.com', password: 'TestPassword123!', role: 'customer', storeId: null }
+    }, superadminToken);
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /New accounts must be/i);
 });

@@ -69,6 +69,8 @@ const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
   auth: { user: smtpUser, pass: smtpPass }
 }) : null;
 const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || 'https://dormdishmobile-static.onrender.com').trim().replace(/\/+$/, '');
+const supportEmail = String(process.env.SUPPORT_EMAIL || 'dormdishdelivery@gmail.com').trim();
+const smtpTestTo = String(process.env.SMTP_TEST_TO || supportEmail || smtpUser).trim();
 function normalizePublicApiUrl(value = '') {
   const raw = String(value || '').trim().replace(/\/+$/, '');
   if (!raw) return '';
@@ -323,7 +325,7 @@ async function requireManagerOrder(req,res,order) {
 
 // Health
 // Auth
-const API_BUILD = 'dormdish-admin-store-media-mail-rider-2026-10-29';
+const API_BUILD = 'dormdish-support-order-labels-smtp-test-2026-10-29';
 app.get('/api/health', run(async (_req,res) => {
   await query('SELECT 1');
   res.json({
@@ -332,8 +334,9 @@ app.get('/api/health', run(async (_req,res) => {
     service: 'dormdish-api',
     build: API_BUILD,
     loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
-    features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment'],
+    features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment','support-email','smtp-test','staff-account-creation','order-status-labels'],
     emailVerification: { configured: emailVerificationConfigured(), smtpConfigured: Boolean(mailer), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
+    supportEmail: { configured: Boolean(mailer && supportEmail), destination: supportEmail },
     timestamp: nowIso()
   });
 }));
@@ -390,6 +393,63 @@ app.get('/api/auth/verify', run(async (req,res) => {
   await query('UPDATE users SET email_verified=1,email_verification_token_hash=NULL,email_verification_expires_at=NULL WHERE id=$1', [user.id]);
   res.json({ success: true, message: `Email verified for ${user.email}. You can return to DormDish.` });
 }));
+// Support mail
+function escapeMailHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+}
+app.post('/api/support', run(async (req, res) => {
+  const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+  const contactNumber = typeof req.body.contactNumber === 'string' ? req.body.contactNumber.trim() : '';
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+  if (name.length < 2 || name.length > 100) return res.status(400).json({ error: 'Enter your name (2–100 characters).' });
+  if (contactNumber.length < 5 || contactNumber.length > 30) return res.status(400).json({ error: 'Enter a valid contact number.' });
+  if (!validEmail(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (message.length < 10 || message.length > 4000) return res.status(400).json({ error: 'Your message must contain 10–4000 characters.' });
+  if (!mailer) return res.status(503).json({ error: 'Support email is unavailable because SMTP_USER or SMTP_PASS is missing in the backend environment.' });
+  if (!supportEmail || !validEmail(supportEmail)) return res.status(503).json({ error: 'SUPPORT_EMAIL must contain a valid email address.' });
+  const safeName = escapeMailHtml(name);
+  const safeEmail = escapeMailHtml(email);
+  const safeNumber = escapeMailHtml(contactNumber);
+  const safeMessage = escapeMailHtml(message).replace(/\r?\n/g, '<br>');
+  try {
+    await mailer.sendMail({
+      from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+      to: supportEmail,
+      replyTo: email,
+      subject: `[DormDish Support] ${name.replace(/[\r\n]+/g, ' ').slice(0, 80)}`,
+      text: `DormDish support message\n\nName: ${name}\nContact number: ${contactNumber}\nEmail: ${email}\n\nMessage:\n${message}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#17231c"><h2>DormDish Support Message</h2><p><strong>Name:</strong> ${safeName}</p><p><strong>Contact number:</strong> ${safeNumber}</p><p><strong>Email:</strong> ${safeEmail}</p><hr><p>${safeMessage}</p></div>`
+    });
+    return res.status(202).json({ success: true, message: 'Your message was sent to DormDish Support. We can reply to the email you provided.' });
+  } catch (error) {
+    const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
+    console.error('Could not send support message:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
+    return res.status(502).json({ error: `Could not send your message (${diagnostic}). Check the SMTP environment variables and Render logs.` });
+  }
+}));
+
+// SMTP test
+app.post('/api/admin/smtp-test', auth, role('superadmin'), run(async (req, res) => {
+  if (!mailer) return res.status(503).json({ error: 'SMTP is not configured. Set SMTP_USER and SMTP_PASS on the DormDishMobile Web Service.' });
+  if (!validEmail(smtpTestTo)) return res.status(503).json({ error: 'SMTP_TEST_TO or SUPPORT_EMAIL must be a valid email address.' });
+  try {
+    await mailer.verify();
+    await mailer.sendMail({
+      from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+      to: smtpTestTo,
+      subject: 'DormDish SMTP test',
+      text: `This is a test email from the DormDish backend. SMTP authentication and outbound mail worked at ${nowIso()}.`
+    });
+    return res.json({ success: true, message: `SMTP test email sent to ${smtpTestTo}. Check that inbox and spam folder.` });
+  } catch (error) {
+    const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
+    const detail = String(error.message || 'Unknown SMTP error').replace(/[\r\n]+/g, ' ').slice(0, 240);
+    console.error('SMTP test failed:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: detail });
+    return res.status(502).json({ error: `SMTP test failed (${diagnostic}): ${detail}. Check Render logs and Gmail App Password settings.` });
+  }
+}));
+
 app.get('/api/settings/public', run(async (_req,res) => {
   const rows = await many("SELECT setting_key,setting_value FROM app_settings WHERE setting_key=ANY($1::text[])", [['delivery_fee','default_eta_minutes','campus_location','student_discount_percent','group_discount_percent','group_discount_min_members','group_discount_min_subtotal']]);
   res.json({ settings: Object.fromEntries(rows.map((r) => [r.setting_key,r.setting_value])) });
@@ -661,7 +721,7 @@ app.get('/api/manager/ratings', auth, role('store_manager'), run(async(req,res)=
 app.get('/api/admin/users', auth, role('superadmin'), run(async(_req,res)=>{res.json({users:await many(`SELECT id,name,email,role,store_id,is_active,is_online,created_at FROM users ORDER BY ${roleOrder},name`)});}));
 app.post('/api/admin/users', auth, role('superadmin'), run(async(req,res)=>{
   const name=typeof req.body.name==='string'?req.body.name.trim():'';const email=typeof req.body.email==='string'?req.body.email.trim().toLowerCase():'';const password=req.body.password;const roleName=req.body.role;const storeId=req.body.storeId==null||req.body.storeId===''?null:Number(req.body.storeId);
-  if(!name||!validEmail(email)||typeof password!=='string'||password.length<8)return res.status(400).json({error:'Enter a name, valid email, and password with at least 8 characters.'});if(!allowedRoles.has(roleName))return res.status(400).json({error:'Choose a valid role.'});
+  if(!name||!validEmail(email)||typeof password!=='string'||password.length<8)return res.status(400).json({error:'Enter a name, valid email, and password with at least 8 characters.'});if(!new Set(['superadmin','store_manager','rider']).has(roleName))return res.status(400).json({error:'New accounts must be Super Admin, Store Manager, or Delivery Rider accounts.'});
   if(['store_manager','rider'].includes(roleName)&&(!storeId||!await getStore(storeId)))return res.status(400).json({error:'Store managers and riders must be assigned to an existing store.'});
   try{const user=await one('INSERT INTO users(name,email,password_hash,role,store_id,created_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at',[name,email,await bcrypt.hash(password,10),roleName,['store_manager','rider'].includes(roleName)?storeId:null,nowIso()]);res.status(201).json({user});}catch(e){if(e.code==='23505')return res.status(409).json({error:'That email address is already registered.'});throw e;}
 }));

@@ -29,7 +29,7 @@ There are two separate Render services:
 - `PUBLIC_WEB_URL`: `https://dormdishmobile-static.onrender.com`
 - `CORS_ORIGIN`: `https://dormdishmobile-static.onrender.com` (no trailing slash)
 
-For Gmail verification, set these on the Web Service only:
+For Gmail verification, support email, and the admin SMTP test button, set these on the Web Service only:
 
 ```text
 SMTP_HOST=smtp.gmail.com
@@ -38,6 +38,9 @@ SMTP_SECURE=true
 SMTP_USER=dormdishdelivery@gmail.com
 SMTP_PASS=<a newly generated Google App Password>
 SMTP_FROM=DormDish Delivery <dormdishdelivery@gmail.com>
+SUPPORT_EMAIL=dormdishdelivery@gmail.com
+# Optional; defaults to SUPPORT_EMAIL
+SMTP_TEST_TO=dormdishdelivery@gmail.com
 ```
 
 Do not reuse an app password that was pasted into a chat or otherwise exposed. Revoke that Google App Password, create a replacement with Google 2-Step Verification enabled, and enter the replacement directly in Render's environment settings. Do not put it in this ZIP, `.env.example`, or GitHub.
@@ -56,7 +59,7 @@ The Postgres backend applies additive schema changes on startup, including the u
 
 1. In the **DormDishMobile Web Service** environment, set `SEED_DEMO_ACCOUNTS=true`.
 2. Optionally set explicit passwords with `DEMO_SUPERADMIN_PASSWORD`, `DEMO_MANAGER_PASSWORD`, `DEMO_CUSTOMER_PASSWORD`, and `DEMO_RIDER_PASSWORD`. If omitted, the code uses the sample values in `.env.example`.
-3. Deploy or restart the Web Service once and check `/api/health` for build `dormdish-live-gps-proof-verification-2026-10-29` and the `demo-account-seeding` feature.
+3. Deploy or restart the Web Service once and check `/api/health` for build `dormdish-support-order-labels-smtp-test-2026-10-29` and the `demo-account-seeding` feature.
 4. **Immediately set `SEED_DEMO_ACCOUNTS=false` and redeploy.** While enabled, startup deliberately resets password hashes for the known `@dormdish.test` demo accounts so the specified demo passwords work. Do not leave demo credentials enabled on a public app longer than your demo requires.
 
 The default demo emails are:
@@ -99,7 +102,21 @@ This adds verification and a visible verified state; it does not block sign-in o
 Open `https://dormdishmobile.onrender.com/api/health`. Confirm:
 
 - `database` is `postgresql`
-- `build` is `dormdish-live-gps-proof-verification-2026-10-29`
+- `build` is `dormdish-support-order-labels-smtp-test-2026-10-29`
 - `features` contains `demo-account-seeding`, `email-verification`, `image-upload`, `rider-live-gps`, and `rider-delivery-proof`
 
 Then test: demo login; upload a small profile image; request a verification email; move a test order to Ready for Pickup; accept it with a rider; confirm pickup with location enabled; open the customer order from another session; submit rider delivery proof and confirm that the customer sees Delivered plus the proof photo.
+
+
+## 8. Support messages and SMTP test
+
+- The login screen has a **Contact support** link; authenticated users can open support from the top bar. The form requires name, contact number, email address, and a message.
+- `POST /api/support` sends the message to `SUPPORT_EMAIL` (defaults to `dormdishdelivery@gmail.com`) using Nodemailer. Replies use the sender-provided email as `Reply-To`.
+- Super Admin → **Settings** → **Send test email** sends a real test message to `SMTP_TEST_TO` (defaults to `SUPPORT_EMAIL`) and returns the transport/authentication failure detail when it cannot send.
+- Set `SMTP_USER` to the Gmail account that generated the App Password. `SMTP_PASS` must be a current Google App Password, not the regular Gmail password. Port `465` requires `SMTP_SECURE=true`; if using port `587`, set `SMTP_SECURE=false` instead. After changing environment variables on Render, save and redeploy/restart the Web Service.
+
+## 9. Order status labels
+
+The database keeps the existing status values so current orders do not need a risky data migration. Customer, manager, and rider screens display them as **Order Received** (`Pending`), **Processed** (`Confirmed`), **In Kitchen** (`Preparing`), **Ready for Pickup**, **On Delivery** (`Out for Delivery`), and **Delivered**. `Cancelled` stays separate. Riders still claim an order after it reaches Ready for Pickup.
+
+New staff accounts are created from Super Admin → Accounts. The create-account endpoint only accepts `superadmin`, `store_manager`, and `rider`; there is no public signup that allows visitors to elevate themselves to staff roles.

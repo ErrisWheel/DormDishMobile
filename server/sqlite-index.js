@@ -51,6 +51,8 @@ const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
     auth: { user: smtpUser, pass: smtpPass }
 }) : null;
 const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || 'https://dormdishmobile-static.onrender.com').trim().replace(/\/+$/, '');
+const supportEmail = String(process.env.SUPPORT_EMAIL || 'dormdishdelivery@gmail.com').trim();
+const smtpTestTo = String(process.env.SMTP_TEST_TO || supportEmail || smtpUser).trim();
 function normalizePublicApiUrl(value = '') {
     const raw = String(value || '').trim().replace(/\/+$/, '');
     if (!raw) return '';
@@ -226,7 +228,7 @@ function logTracking(orderId, updatedBy, status, note, locationLabel, etaAt) {
     `).run(orderId, updatedBy, status, note, locationLabel || '', etaAt || null, new Date().toISOString());
 }
 
-const API_BUILD = 'dormdish-admin-store-media-mail-rider-2026-10-29';
+const API_BUILD = 'dormdish-support-order-labels-smtp-test-2026-10-29';
 app.get('/api/health', (req, res) => {
     res.json({
         ok: true,
@@ -234,8 +236,9 @@ app.get('/api/health', (req, res) => {
         service: 'dormdish-api',
         build: API_BUILD,
         loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
-        features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment'],
+        features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment','support-email','smtp-test','staff-account-creation','order-status-labels'],
         emailVerification: { configured: verificationConfigured(), smtpConfigured: Boolean(mailer), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
+        supportEmail: { configured: Boolean(mailer && supportEmail), destination: supportEmail },
         timestamp: new Date().toISOString()
     });
 });
@@ -304,6 +307,63 @@ app.get('/api/auth/verify', (req, res) => {
     }
     db.prepare('UPDATE users SET email_verified = 1,email_verification_token_hash = NULL,email_verification_expires_at = NULL WHERE id = ?').run(user.id);
     return res.json({ success: true, message: `Email ${user.email} verified successfully.` });
+});
+
+// Support mail
+function escapeMailHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+}
+app.post('/api/support', async (req, res) => {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const contactNumber = typeof req.body.contactNumber === 'string' ? req.body.contactNumber.trim() : '';
+    const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+    if (name.length < 2 || name.length > 100) return res.status(400).json({ error: 'Enter your name (2–100 characters).' });
+    if (contactNumber.length < 5 || contactNumber.length > 30) return res.status(400).json({ error: 'Enter a valid contact number.' });
+    if (!isValidEmail(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (message.length < 10 || message.length > 4000) return res.status(400).json({ error: 'Your message must contain 10–4000 characters.' });
+    if (!mailer) return res.status(503).json({ error: 'Support email is unavailable because SMTP_USER or SMTP_PASS is missing in the backend environment.' });
+    if (!supportEmail || !isValidEmail(supportEmail)) return res.status(503).json({ error: 'SUPPORT_EMAIL must contain a valid email address.' });
+    const safeName = escapeMailHtml(name);
+    const safeEmail = escapeMailHtml(email);
+    const safeNumber = escapeMailHtml(contactNumber);
+    const safeMessage = escapeMailHtml(message).replace(/\r?\n/g, '<br>');
+    try {
+        await mailer.sendMail({
+            from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+            to: supportEmail,
+            replyTo: email,
+            subject: `[DormDish Support] ${name.replace(/[\r\n]+/g, ' ').slice(0, 80)}`,
+            text: `DormDish support message\n\nName: ${name}\nContact number: ${contactNumber}\nEmail: ${email}\n\nMessage:\n${message}`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#17231c"><h2>DormDish Support Message</h2><p><strong>Name:</strong> ${safeName}</p><p><strong>Contact number:</strong> ${safeNumber}</p><p><strong>Email:</strong> ${safeEmail}</p><hr><p>${safeMessage}</p></div>`
+        });
+        return res.status(202).json({ success: true, message: 'Your message was sent to DormDish Support. We can reply to the email you provided.' });
+    } catch (error) {
+        const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
+        console.error('Could not send support message:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
+        return res.status(502).json({ error: `Could not send your message (${diagnostic}). Check the SMTP environment variables and Render logs.` });
+    }
+});
+
+// SMTP test
+app.post('/api/admin/smtp-test', requireAuth, allowRoles('superadmin'), async (req, res) => {
+    if (!mailer) return res.status(503).json({ error: 'SMTP is not configured. Set SMTP_USER and SMTP_PASS on the DormDishMobile Web Service.' });
+    if (!isValidEmail(smtpTestTo)) return res.status(503).json({ error: 'SMTP_TEST_TO or SUPPORT_EMAIL must be a valid email address.' });
+    try {
+        await mailer.verify();
+        await mailer.sendMail({
+            from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+            to: smtpTestTo,
+            subject: 'DormDish SMTP test',
+            text: `This is a test email from the DormDish backend. SMTP authentication and outbound mail worked at ${new Date().toISOString()}.`
+        });
+        return res.json({ success: true, message: `SMTP test email sent to ${smtpTestTo}. Check that inbox and spam folder.` });
+    } catch (error) {
+        const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
+        const detail = String(error.message || 'Unknown SMTP error').replace(/[\r\n]+/g, ' ').slice(0, 240);
+        console.error('SMTP test failed:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: detail });
+        return res.status(502).json({ error: `SMTP test failed (${diagnostic}): ${detail}. Check Render logs and Gmail App Password settings.` });
+    }
 });
 
 app.get('/api/settings/public', (req, res) => {
@@ -984,8 +1044,8 @@ app.post('/api/admin/users', requireAuth, allowRoles('superadmin'), (req, res) =
         return res.status(400).json({ error: 'Enter a name, valid email, and password with at least 8 characters.' });
     }
 
-    if (!['superadmin', 'store_manager', 'customer', 'rider'].includes(role)) {
-        return res.status(400).json({ error: 'Choose a valid role.' });
+    if (!['superadmin', 'store_manager', 'rider'].includes(role)) {
+        return res.status(400).json({ error: 'New accounts must be Super Admin, Store Manager, or Delivery Rider accounts.' });
     }
 
     if (['store_manager', 'rider'].includes(role) && (!store_id || !getStoreById(store_id))) {

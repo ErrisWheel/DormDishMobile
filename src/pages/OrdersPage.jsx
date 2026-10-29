@@ -34,6 +34,8 @@ import {
     CheckCircle2
 } from 'lucide-react';
 
+import { orderStatusLabel } from '../lib/order-status.js';
+
 import {
     products,
     categories,
@@ -90,7 +92,7 @@ export function OrdersPage({
 
                                 <span className="order-status">
                                     <i />
-                                    {order.status}
+                                    {orderStatusLabel(order.status)}
                                 </span>
                             </div>
 
