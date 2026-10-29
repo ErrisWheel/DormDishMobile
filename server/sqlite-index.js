@@ -36,16 +36,36 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
 
-const smtpUser = process.env.SMTP_USER || '';
-const smtpPass = process.env.SMTP_PASS || '';
+// Nodemailer
+const smtpUser = String(process.env.SMTP_USER || '').trim();
+const smtpPass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
+const smtpPort = Number(process.env.SMTP_PORT || 465);
+const smtpSecure = process.env.SMTP_SECURE === undefined ? smtpPort === 465 : String(process.env.SMTP_SECURE).toLowerCase() !== 'false';
 const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT || 465),
-    secure: String(process.env.SMTP_SECURE ?? 'true').toLowerCase() !== 'false',
+    port: smtpPort,
+    secure: smtpSecure,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000,
     auth: { user: smtpUser, pass: smtpPass }
 }) : null;
-const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || '').replace(/\/+$/, '');
-const publicApiUrl = String(process.env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || 'https://dormdishmobile-static.onrender.com').trim().replace(/\/+$/, '');
+function normalizePublicApiUrl(value = '') {
+    const raw = String(value || '').trim().replace(/\/+$/, '');
+    if (!raw) return '';
+    try {
+        const url = new URL(raw);
+        if (url.hostname.toLowerCase() === 'dormdish-api.onrender.com') url.hostname = 'dormdishmobile.onrender.com';
+        const pathname = url.pathname.replace(/\/+$/, '');
+        url.pathname = /\/api$/i.test(pathname) ? pathname : `${pathname}/api`;
+        return url.toString().replace(/\/+$/, '');
+    } catch {
+        return raw;
+    }
+}
+const publicApiUrl = normalizePublicApiUrl(process.env.PUBLIC_API_URL || '');
+function getPublicApiUrl(_req) { return publicApiUrl || '/api'; }
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const verificationConfigured = () => Boolean(mailer && publicWebUrl);
 async function sendVerificationMessage(user, rawToken) {
@@ -206,7 +226,7 @@ function logTracking(orderId, updatedBy, status, note, locationLabel, etaAt) {
     `).run(orderId, updatedBy, status, note, locationLabel || '', etaAt || null, new Date().toISOString());
 }
 
-const API_BUILD = 'dormdish-live-gps-proof-verification-2026-10-29';
+const API_BUILD = 'dormdish-admin-store-media-mail-rider-2026-10-29';
 app.get('/api/health', (req, res) => {
     res.json({
         ok: true,
@@ -214,11 +234,13 @@ app.get('/api/health', (req, res) => {
         service: 'dormdish-api',
         build: API_BUILD,
         loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
-        features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof'],
+        features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment'],
+        emailVerification: { configured: verificationConfigured(), smtpConfigured: Boolean(mailer), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
         timestamp: new Date().toISOString()
     });
 });
 
+// Auth
 const loginHandler = (req, res) => {
     const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body.password === 'string' ? req.body.password : '';
@@ -263,9 +285,10 @@ app.post('/api/auth/verification/send', requireAuth, async (req, res) => {
     db.prepare('UPDATE users SET email_verification_token_hash = ?, email_verification_expires_at = ?, email_verification_sent_at = ? WHERE id = ?').run(sha256(rawToken), expiresAt, new Date().toISOString(), user.id);
     try { await sendVerificationMessage(user, rawToken); }
     catch (error) {
-        db.prepare('UPDATE users SET email_verification_token_hash = NULL, email_verification_expires_at = NULL WHERE id = ?').run(user.id);
-        console.error('Could not send verification email:', error.message);
-        return res.status(502).json({ error: 'Could not send verification email. Check SMTP settings and Render logs.' });
+        db.prepare('UPDATE users SET email_verification_token_hash = NULL, email_verification_expires_at = NULL, email_verification_sent_at = NULL WHERE id = ?').run(user.id);
+        console.error('Could not send verification email:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
+        const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
+        return res.status(502).json({ error: `Could not send verification email (${diagnostic}). Check SMTP credentials and Render logs.` });
     }
     return res.json({ success: true, message: `Verification email sent to ${user.email}.` });
 });
@@ -438,12 +461,12 @@ app.post('/api/uploads/products', requireAuth, allowRoles('store_manager'), (req
     const id = crypto.randomUUID();
     const safeName = String(filename || 'product-image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100) || 'product-image';
     db.prepare('INSERT INTO product_images(id,mime_type,file_name,image_data,created_at) VALUES(?,?,?,?,?)').run(id, mimeType, safeName, bytes, new Date().toISOString());
-    const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+    const apiBase = getPublicApiUrl(req);
     return res.status(201).json({ url: `${apiBase}/product-images/${id}`, imageId: id, storage: 'sqlite' });
 });
 
 
-// General-purpose media is persisted in the database; Render's ephemeral filesystem is not used.
+// Media
 app.get('/api/media/:id', (req, res) => {
     if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ error: 'Image not found.' });
     const media = db.prepare('SELECT mime_type,image_data FROM uploaded_media WHERE id = ?').get(req.params.id);
@@ -474,7 +497,7 @@ app.post('/api/uploads/:kind', requireAuth, (req, res) => {
     const safeName = String(filename || `${kind}-image`).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100) || `${kind}-image`;
     db.prepare('INSERT INTO uploaded_media(id,purpose,mime_type,file_name,image_data,uploaded_by,created_at) VALUES(?,?,?,?,?,?,?)')
         .run(id, kind, mimeType, safeName, bytes, req.user.id, new Date().toISOString());
-    const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+    const apiBase = getPublicApiUrl(req);
     return res.status(201).json({ url: `${apiBase}/media/${id}`, imageId: id, storage: 'sqlite', purpose: kind });
 });
 
@@ -592,7 +615,7 @@ app.post('/api/orders', requireAuth, allowRoles('customer'), (req, res) => {
 
         const deliveryFee = pricing.policy.deliveryFee;
         const total = Math.max(0, pricing.subtotal - pricing.discountTotal) + deliveryFee;
-        // Keep new orders unassigned so online riders can accept them from the delivery dashboard.
+        // Pickup
         const orderId = `DD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
         const now = new Date().toISOString();
 
@@ -713,7 +736,7 @@ app.post('/api/orders/:id/delivery-proof', requireAuth, allowRoles('rider'), (re
         logTracking(order.id, req.user.id, 'Delivered', 'The rider confirmed delivery with a photo proof.', '', null);
     });
     try { update(); } catch (error) { return res.status(409).json({ error: error.message || 'Could not confirm delivery.' }); }
-    const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+    const apiBase = getPublicApiUrl(req);
     return res.json({ success: true, deliveryProofUrl: `${apiBase}/media/${mediaId}`, order: getOrderDetails(order.id) });
 });
 
@@ -824,35 +847,9 @@ app.patch('/api/orders/:id/progress', requireAuth, allowRoles('store_manager', '
     }
 });
 
-app.patch('/api/orders/:id/assign-rider', requireAuth, allowRoles('store_manager'), (req, res) => {
-    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
-
-    if (!order) {
-        return res.status(404).json({ error: 'Order not found.' });
-    }
-
-    if (!requireStoreManagerOfOrder(req, res, order)) return;
-
-    const riderId = req.body.riderId === null || req.body.riderId === '' ? null : Number(req.body.riderId);
-    let rider = null;
-
-    if (riderId !== null) {
-        rider = db.prepare(`
-            SELECT id, name, store_id FROM users
-            WHERE id = ? AND role = 'rider' AND is_active = 1
-        `).get(riderId);
-
-        if (!rider || rider.store_id !== order.store_id) {
-            return res.status(400).json({ error: 'Choose an active rider assigned to your store.' });
-        }
-    }
-
-    db.prepare('UPDATE orders SET rider_id = ?, updated_at = ? WHERE id = ?')
-        .run(riderId, new Date().toISOString(), order.id);
-    logTracking(order.id, req.user.id, order.status, rider ? `Assigned to ${rider.name}.` : 'Rider assignment removed.', '', order.eta_at);
-    res.json({ order: getOrderDetails(order.id) });
+app.patch('/api/orders/:id/assign-rider', requireAuth, (req, res) => {
+    return res.status(403).json({ error: 'Store staff cannot assign riders. Riders claim available pickups themselves.' });
 });
-
 app.post('/api/orders/:id/ratings', requireAuth, allowRoles('customer'), (req, res) => {
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND customer_id = ?')
         .get(req.params.id, req.user.id);
@@ -889,6 +886,7 @@ app.post('/api/orders/:id/ratings', requireAuth, allowRoles('customer'), (req, r
     res.status(201).json({ success: true });
 });
 
+// Rider jobs
 app.get('/api/rider/jobs', requireAuth, allowRoles('rider'), (req, res) => {
     const riderStoreId = userStoreId(req.user);
     const availableIds = db.prepare(`
@@ -1244,7 +1242,7 @@ registerGroupOrderRoutes(app, {
     logTracking
 });
 
-// Return JSON for unmatched API paths instead of Express's default HTML 404.
+// Fallback routes
 app.use((req, res, next) => {
     if (/^\/(?:api|auth)(?:\/|$)/.test(req.path)) {
         return res.status(404).json({

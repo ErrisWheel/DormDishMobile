@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Check, Eye, EyeOff, Plus, RefreshCw, Save, Store, Trash2, Users } from 'lucide-react';
 import { apiRequest, formatDate } from '../../lib/api.js';
 import { ImageUploadField } from '../../components/ImageUploadField.jsx';
+import { MediaImage } from '../../components/MediaImage.jsx';
 
 const emptyUser = { name: '', email: '', password: '', role: 'customer', storeId: '' };
-const emptyStore = { name: '', description: '', imageUrl: '/images/hero-food.png', locationName: '', mapsUrl: '' };
+const emptyStore = { name: '', description: '', imageUrl: '/images/hero-food.png', locationName: '', mapsUrl: '', managerId: '' };
 
+// Accounts
 function UserManagementRow({ user, stores, onSave, onToast }) {
     const [form, setForm] = useState({
         name: user.name,
@@ -42,6 +44,7 @@ function UserManagementRow({ user, stores, onSave, onToast }) {
     return <tr><td><input className="table-input" value={form.name} onChange={(event) => update('name', event.target.value)} /></td><td><input className="table-input" type="email" value={form.email} onChange={(event) => update('email', event.target.value)} /></td><td><select className="table-select" value={form.role} onChange={(event) => update('role', event.target.value)}><option value="superadmin">Super Admin</option><option value="store_manager">Store Manager</option><option value="customer">Customer</option><option value="rider">Delivery Rider</option></select></td><td><select className="table-select" value={form.storeId} onChange={(event) => update('storeId', event.target.value)} disabled={!['store_manager', 'rider'].includes(form.role)}><option value="">No store</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></td><td><label className="table-active-toggle"><input type="checkbox" checked={form.isActive} onChange={(event) => update('isActive', event.target.checked)} />{form.isActive ? 'Active' : 'Disabled'}</label></td><td><button className="icon-button" disabled={saving || !form.name.trim() || !form.email.trim() || (['store_manager', 'rider'].includes(form.role) && !form.storeId)} onClick={save} aria-label={`Save ${user.name}`}><Save size={16} /></button></td></tr>;
 }
 
+// Stores
 function StoreManagementCard({ store, users, onSave, onAssign, onDelete }) {
     const [form, setForm] = useState({ name: store.name, description: store.description, imageUrl: store.image_url, locationName: store.location_name, mapsUrl: store.maps_url, isActive: Boolean(store.is_active) });
     const [managerId, setManagerId] = useState(store.manager_id ? String(store.manager_id) : '');
@@ -62,9 +65,10 @@ function StoreManagementCard({ store, users, onSave, onAssign, onDelete }) {
         }
     }
 
-    return <article className="store-admin-card"><div className="store-admin-header"><img src={form.imageUrl || '/images/hero-food.png'} alt="" /><div><span className="eyebrow">STORE #{store.id}</span><h3>{store.name}</h3><p>{store.rating ? Number(store.rating).toFixed(1) : 'No'} rating · {store.rating_count} reviews</p></div></div><div className="form-grid"><label>Store name<input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label><div className="form-span-two"><ImageUploadField kind="store" label="Store photo" value={form.imageUrl} onChange={(imageUrl) => setForm((current) => ({ ...current, imageUrl }))} /></div><label className="form-span-two">Description<input value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label><label>Location name<input value={form.locationName} onChange={(event) => setForm((current) => ({ ...current, locationName: event.target.value }))} /></label><label>Google Maps URL<input value={form.mapsUrl} onChange={(event) => setForm((current) => ({ ...current, mapsUrl: event.target.value }))} /></label><label>Store Manager<select value={managerId} onChange={async (event) => { const next = event.target.value; setManagerId(next); await onAssign(store.id, next || null); }}><option value="">Unassigned</option>{managers.map((manager) => <option key={manager.id} value={manager.id}>{manager.name}</option>)}</select></label><label className="checkbox-field"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} /> Store available to customers</label></div><div className="store-admin-actions"><button className="primary-button" disabled={saving || !form.name.trim()} onClick={save}><Save size={15} /> Save store</button><button className="secondary-button" onClick={() => onDelete(store)}><Trash2 size={15} /> Archive / delete</button></div></article>;
+    return <article className="store-admin-card"><div className="store-admin-header"><MediaImage src={form.imageUrl || '/images/hero-food.png'} alt="" fallbackSrc="/images/hero-food.png" /><div><span className="eyebrow">STORE #{store.id}</span><h3>{store.name}</h3><p>{store.rating ? Number(store.rating).toFixed(1) : 'No'} rating · {store.rating_count} reviews</p></div></div><div className="form-grid"><label>Store name<input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label><div className="form-span-two"><ImageUploadField kind="store" label="Store photo" value={form.imageUrl} onChange={(imageUrl) => setForm((current) => ({ ...current, imageUrl }))} /></div><label className="form-span-two">Description<input value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label><label>Location name<input value={form.locationName} onChange={(event) => setForm((current) => ({ ...current, locationName: event.target.value }))} /></label><label>Google Maps URL<input value={form.mapsUrl} onChange={(event) => setForm((current) => ({ ...current, mapsUrl: event.target.value }))} /></label><label>Store Manager<select value={managerId} onChange={async (event) => { const next = event.target.value; setManagerId(next); await onAssign(store.id, next || null); }}><option value="">Unassigned</option>{managers.map((manager) => <option key={manager.id} value={manager.id}>{manager.name}</option>)}</select></label><label className="checkbox-field"><input type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} /> Store available to customers</label></div><div className="store-admin-actions"><button className="primary-button" disabled={saving || !form.name.trim()} onClick={save}><Save size={15} /> Save store</button><button className="secondary-button" onClick={() => onDelete(store)}><Trash2 size={15} /> Archive / delete</button></div></article>;
 }
 
+// Admin dashboard
 export function AdminDashboard({ page, onToast }) {
     const [users, setUsers] = useState([]);
     const [stores, setStores] = useState([]);
@@ -148,15 +152,21 @@ export function AdminDashboard({ page, onToast }) {
         }
     }
 
+    // Register store
     async function createStore(event) {
         event.preventDefault();
         try {
-            await apiRequest('/admin/stores', { method: 'POST', body: storeForm });
+            const { managerId, ...storePayload } = storeForm;
+            const result = await apiRequest('/admin/stores', { method: 'POST', body: storePayload });
+            if (managerId && result.store?.id) {
+                await apiRequest(`/admin/stores/${result.store.id}/manager`, { method: 'PATCH', body: { managerId: Number(managerId) } });
+            }
             setStoreForm(emptyStore);
-            onToast('Store created.');
+            onToast(managerId ? 'Store created and manager assigned.' : 'Store created.');
             await refresh();
         } catch (requestError) {
             setError(requestError.message);
+            await refresh();
         }
     }
 
@@ -213,7 +223,7 @@ export function AdminDashboard({ page, onToast }) {
                 <section className="dashboard-panel"><div className="panel-heading"><div><h2>Accounts</h2><p>Change roles and store associations carefully.</p></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Store</th><th>Access</th><th>Save</th></tr></thead><tbody>{users.map((user) => <UserManagementRow key={user.id} user={user} stores={stores} onSave={saveUser} onToast={onToast} />)}</tbody></table></div></section>
             </>}
             {page === 'admin-stores' && <>
-                <section className="dashboard-panel"><div className="panel-heading"><div><h2>Register a store</h2><p>Store names can be replaced with real canteen names later.</p></div><Store size={20} /></div><form className="product-editor-form" onSubmit={createStore}><div className="form-grid"><label>Store name<input value={storeForm.name} onChange={(event) => setStoreForm((current) => ({ ...current, name: event.target.value }))} required /></label><div className="form-span-two"><ImageUploadField kind="store" label="Store photo" value={storeForm.imageUrl} onChange={(imageUrl) => setStoreForm((current) => ({ ...current, imageUrl }))} /></div><label className="form-span-two">Description<input value={storeForm.description} onChange={(event) => setStoreForm((current) => ({ ...current, description: event.target.value }))} /></label><label>Location name<input value={storeForm.locationName} onChange={(event) => setStoreForm((current) => ({ ...current, locationName: event.target.value }))} /></label><label>Google Maps URL<input value={storeForm.mapsUrl} onChange={(event) => setStoreForm((current) => ({ ...current, mapsUrl: event.target.value }))} /></label></div><button className="primary-button" type="submit"><Plus size={16} /> Register store</button></form></section>
+                <section className="dashboard-panel"><div className="panel-heading"><div><h2>Register a store</h2><p>Store names can be replaced with real canteen names later.</p></div><Store size={20} /></div><form className="product-editor-form" onSubmit={createStore}><div className="form-grid"><label>Store name<input value={storeForm.name} onChange={(event) => setStoreForm((current) => ({ ...current, name: event.target.value }))} required /></label><div className="form-span-two"><ImageUploadField kind="store" label="Store photo" value={storeForm.imageUrl} onChange={(imageUrl) => setStoreForm((current) => ({ ...current, imageUrl }))} /></div><label className="form-span-two">Description<input value={storeForm.description} onChange={(event) => setStoreForm((current) => ({ ...current, description: event.target.value }))} /></label><label>Location name<input value={storeForm.locationName} onChange={(event) => setStoreForm((current) => ({ ...current, locationName: event.target.value }))} /></label><label>Google Maps URL<input value={storeForm.mapsUrl} onChange={(event) => setStoreForm((current) => ({ ...current, mapsUrl: event.target.value }))} /></label><label>Assign manager<select value={storeForm.managerId} onChange={(event) => setStoreForm((current) => ({ ...current, managerId: event.target.value }))}><option value="">Assign later</option>{users.filter((user) => user.role === 'store_manager' && user.is_active).map((manager) => <option key={manager.id} value={manager.id}>{manager.name} · {manager.email}</option>)}</select><small>Managers can be reassigned from the store cards below.</small></label></div><button className="primary-button" type="submit"><Plus size={16} /> Register store</button></form></section>
                 <div className="store-admin-grid">{stores.map((store) => <StoreManagementCard key={store.id} store={store} users={users} onSave={saveStore} onAssign={assignManager} onDelete={deleteStore} />)}</div>
             </>}
             {page === 'admin-settings' && <section className="dashboard-panel"><div className="panel-heading"><div><h2>General settings</h2><p>These values are read by local API and checkout workflows.</p></div></div><form className="product-editor-form" onSubmit={saveSettings}><div className="form-grid"><label>Application name<input value={settings.app_name} onChange={(event) => setSettings((current) => ({ ...current, app_name: event.target.value }))} required /></label><label>Delivery fee (₱)<input type="number" min="0" step="0.01" value={settings.delivery_fee} onChange={(event) => setSettings((current) => ({ ...current, delivery_fee: event.target.value }))} required /></label><label>Default ETA (minutes)<input type="number" min="0" max="240" value={settings.default_eta_minutes} onChange={(event) => setSettings((current) => ({ ...current, default_eta_minutes: event.target.value }))} required /></label><label>Campus location<input value={settings.campus_location} onChange={(event) => setSettings((current) => ({ ...current, campus_location: event.target.value }))} required /></label></div><button className="primary-button" type="submit"><Save size={16} /> Save settings</button></form></section>}

@@ -54,15 +54,36 @@ const query = (text, values = [], client = pool) => client.query(text, values);
 const one = async (text, values = [], client = pool) => (await query(text, values, client)).rows[0] || null;
 const many = async (text, values = [], client = pool) => (await query(text, values, client)).rows;
 const nowIso = () => new Date().toISOString();
-const smtpUser = process.env.SMTP_USER || '';
-const smtpPass = process.env.SMTP_PASS || '';
+// Nodemailer
+const smtpUser = String(process.env.SMTP_USER || '').trim();
+const smtpPass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
+const smtpPort = Number(process.env.SMTP_PORT || 465);
+const smtpSecure = process.env.SMTP_SECURE === undefined ? smtpPort === 465 : String(process.env.SMTP_SECURE).toLowerCase() !== 'false';
 const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT || 465),
-  secure: String(process.env.SMTP_SECURE ?? 'true').toLowerCase() !== 'false',
+  port: smtpPort,
+  secure: smtpSecure,
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 30000,
   auth: { user: smtpUser, pass: smtpPass }
 }) : null;
-const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || 'https://dormdishmobile-static.onrender.com').trim().replace(/\/+$/, '');
+function normalizePublicApiUrl(value = '') {
+  const raw = String(value || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.hostname.toLowerCase() === 'dormdish-api.onrender.com') url.hostname = 'dormdishmobile.onrender.com';
+    const pathname = url.pathname.replace(/\/+$/, '');
+    url.pathname = /\/api$/i.test(pathname) ? pathname : `${pathname}/api`;
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return raw;
+  }
+}
+const publicApiUrl = normalizePublicApiUrl(process.env.PUBLIC_API_URL || '');
+function getPublicApiUrl(req) { return publicApiUrl || normalizePublicApiUrl(`${req.protocol}://${req.get('host')}/api`); }
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function emailVerificationConfigured() { return Boolean(mailer && publicWebUrl); }
 async function sendVerificationMessage(user, rawToken) {
@@ -168,7 +189,7 @@ async function seedSampleData() {
 }
 
 
-// Explicit opt-in, idempotent demo seeding. When enabled, only known demo accounts are deliberately reset to the configured demo passwords.
+// Demo accounts
 async function seedDemoAccounts() {
   const stores = await many('SELECT id,name FROM stores WHERE is_active=1 ORDER BY id LIMIT 3');
   const passwords = {
@@ -259,7 +280,7 @@ async function getOrderDetails(id, client = pool) {
     one('SELECT order_id,rider_id,latitude,longitude,accuracy_m,recorded_at FROM rider_locations WHERE order_id=$1', [id], client),
     one('SELECT media_id,delivered_at FROM delivery_proofs WHERE order_id=$1', [id], client)
   ]);
-  const apiBase = String(process.env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+  const apiBase = publicApiUrl;
   return { ...order, items, tracking, rating: rating || null, rider_location: riderLocation || null, delivery_proof_url: deliveryProof ? `${apiBase || '/api'}/media/${deliveryProof.media_id}` : null };
 }
 async function logTracking(orderId, updatedBy, status, note, locationLabel = '', etaAt = null, client = pool) {
@@ -300,8 +321,9 @@ async function requireManagerOrder(req,res,order) {
   return false;
 }
 
-// Health and authentication.
-const API_BUILD = 'dormdish-live-gps-proof-verification-2026-10-29';
+// Health
+// Auth
+const API_BUILD = 'dormdish-admin-store-media-mail-rider-2026-10-29';
 app.get('/api/health', run(async (_req,res) => {
   await query('SELECT 1');
   res.json({
@@ -310,12 +332,13 @@ app.get('/api/health', run(async (_req,res) => {
     service: 'dormdish-api',
     build: API_BUILD,
     loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
-    features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof'],
+    features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment'],
+    emailVerification: { configured: emailVerificationConfigured(), smtpConfigured: Boolean(mailer), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
     timestamp: nowIso()
   });
 }));
 
-// Register both the normal API path and the path used if a proxy strips /api.
+// Login routes
 const loginHandler = run(async (req,res) => {
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
@@ -347,9 +370,10 @@ app.post('/api/auth/verification/send', auth, run(async (req,res) => {
   await query('UPDATE users SET email_verification_token_hash=$1,email_verification_expires_at=$2,email_verification_sent_at=$3 WHERE id=$4', [sha256(rawToken),expiresAt,nowIso(),user.id]);
   try { await sendVerificationMessage(user, rawToken); }
   catch (error) {
-    await query('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL WHERE id=$1', [user.id]);
-    console.error('Could not send verification email:', error.message);
-    return res.status(502).json({ error: 'Could not send the verification email. Check SMTP settings and Render logs.' });
+    await query('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL,email_verification_sent_at=NULL WHERE id=$1', [user.id]);
+    console.error('Could not send verification email:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
+    const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
+    return res.status(502).json({ error: `Could not send the verification email (${diagnostic}). Check SMTP credentials and Render logs.` });
   }
   res.json({ success: true, message: `Verification email sent to ${user.email}.` });
 }));
@@ -414,7 +438,7 @@ app.delete('/api/products/:id', auth, role('store_manager'), run(async (req,res)
   res.json({ success: true });
 }));
 
-// Public product-photo reads come directly from PostgreSQL BYTEA storage.
+// Product images
 app.get('/api/product-images/:id', run(async (req, res) => {
   if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ error: 'Product image not found.' });
   const image = await one('SELECT mime_type, image_data FROM product_images WHERE id=$1', [req.params.id]);
@@ -425,7 +449,7 @@ app.get('/api/product-images/:id', run(async (req, res) => {
   res.send(image.image_data);
 }));
 
-// Product photos are stored as binary data in Neon PostgreSQL, not on Render's ephemeral disk.
+// Product uploads
 app.post('/api/uploads/products', auth, role('store_manager'), run(async (req,res) => {
   const { filename, mimeType, data } = req.body || {};
   const supportedTypes = ['image/jpeg','image/png','image/webp','image/avif'];
@@ -437,12 +461,12 @@ app.post('/api/uploads/products', auth, role('store_manager'), run(async (req,re
   const id = crypto.randomUUID();
   const safeName = String(filename || 'product-image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0,100) || 'product-image';
   await query('INSERT INTO product_images(id,mime_type,file_name,image_data,created_at) VALUES($1,$2,$3,$4,$5)', [id, mimeType, safeName, bytes, nowIso()]);
-  const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+  const apiBase = getPublicApiUrl(req);
   res.status(201).json({ url: `${apiBase}/product-images/${id}`, imageId: id, storage: 'postgresql' });
 }));
 
 
-// General-purpose image storage in Neon; actual image bytes live in BYTEA, not the Render filesystem.
+// Media
 app.get('/api/media/:id', run(async (req,res) => {
   if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ error: 'Image not found.' });
   const image = await one('SELECT mime_type,image_data FROM uploaded_media WHERE id=$1', [req.params.id]);
@@ -471,11 +495,11 @@ app.post('/api/uploads/:kind', auth, run(async (req,res) => {
   const id = crypto.randomUUID();
   const safeName = String(filename || `${kind}-image`).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0,100) || `${kind}-image`;
   await query('INSERT INTO uploaded_media(id,purpose,mime_type,file_name,image_data,uploaded_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)', [id,kind,mimeType,safeName,bytes,req.user.id,nowIso()]);
-  const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+  const apiBase = getPublicApiUrl(req);
   res.status(201).json({ url: `${apiBase}/media/${id}`, imageId: id, storage: 'postgresql', purpose: kind });
 }));
 
-// Customer orders, manager orders, and rider jobs.
+// Orders
 app.get('/api/orders', auth, run(async (req,res) => {
   if (req.user.role === 'superadmin') return res.status(403).json({ error: 'Super Admin does not have order-management access.' });
   let rows;
@@ -509,7 +533,7 @@ app.post('/api/orders', auth, role('customer'), run(async (req,res) => {
     }
     const pricing = await discounts(selected.map(({product,quantity})=>({product,quantity})),1,client);
     const deliveryFee=pricing.policy.deliveryFee, total=Math.max(0,pricing.subtotal-pricing.discountTotal)+deliveryFee;
-    // Leave new orders unassigned so online riders can accept the offer.
+    // Pickup
     orderId=idToken(); const now=nowIso();
     await query(`INSERT INTO orders(id,customer_id,store_id,rider_id,status,subtotal,delivery_fee,total,discount_total,student_discount,group_discount,group_order_id,payment_method,delivery_address,order_notes,created_at,updated_at)
       VALUES($1,$2,$3,NULL,'Pending',$4,$5,$6,$7,$8,$9,NULL,$10,$11,$12,$13,$13)`,[orderId,req.user.id,storeId,pricing.subtotal,deliveryFee,total,pricing.discountTotal,pricing.studentDiscount,pricing.groupDiscount,typeof req.body.paymentMethod==='string'&&req.body.paymentMethod.trim()?req.body.paymentMethod.trim():'Cash on delivery',address,typeof req.body.orderNotes==='string'?req.body.orderNotes.trim().slice(0,500):'',now],client);
@@ -569,7 +593,7 @@ app.post('/api/orders/:id/delivery-proof', auth, role('rider'), run(async(req,re
     await logTracking(order.id,req.user.id,'Delivered','The rider confirmed delivery with a photo proof.','',null,client);
     await client.query('COMMIT');
   }catch(error){await client.query('ROLLBACK');return res.status(409).json({error:error.message||'Could not confirm delivery.'});}finally{client.release();}
-  const apiBase=String(process.env.PUBLIC_API_URL||`${req.protocol}://${req.get('host')}/api`).replace(/\/+$/,'');
+  const apiBase=getPublicApiUrl(req);
   res.json({success:true,deliveryProofUrl:`${apiBase}/media/${mediaId}`,order:await getOrderDetails(order.id)});
 }));
 
@@ -601,17 +625,15 @@ app.patch('/api/orders/:id/progress', auth, role('store_manager','rider'), run(a
     await logTracking(order.id,req.user.id,status,typeof note==='string'&&note.trim()?note.trim():notes[status]||'Order progress updated.',typeof locationLabel==='string'?locationLabel.trim():'',etaAt,client);await client.query('COMMIT');res.json({order:await getOrderDetails(order.id)});
   }catch(error){await client.query('ROLLBACK');res.status(400).json({error:error.message||'Could not update order progress.'});}finally{client.release();}
 }));
-app.patch('/api/orders/:id/assign-rider', auth, role('store_manager'), run(async(req,res)=>{
-  const order=await one('SELECT * FROM orders WHERE id=$1',[req.params.id]);if(!order)return res.status(404).json({error:'Order not found.'});if(!await requireManagerOrder(req,res,order))return;
-  const riderId=req.body.riderId===null||req.body.riderId===''?null:Number(req.body.riderId);let rider=null;
-  if(riderId!==null){rider=await one("SELECT id,name,store_id FROM users WHERE id=$1 AND role='rider' AND is_active=1",[riderId]);if(!rider||Number(rider.store_id)!==Number(order.store_id))return res.status(400).json({error:'Choose an active rider assigned to your store.'});}
-  await query('UPDATE orders SET rider_id=$1,updated_at=$2 WHERE id=$3',[riderId,nowIso(),order.id]);await logTracking(order.id,req.user.id,order.status,rider?`Assigned to ${rider.name}.`:'Rider assignment removed.','',order.eta_at);res.json({order:await getOrderDetails(order.id)});
+app.patch('/api/orders/:id/assign-rider', auth, run(async (req, res) => {
+  res.status(403).json({ error: 'Store staff cannot assign riders. Riders claim available pickups themselves.' });
 }));
 app.post('/api/orders/:id/ratings', auth, role('customer'), run(async(req,res)=>{
   const order=await one('SELECT * FROM orders WHERE id=$1 AND customer_id=$2',[req.params.id,req.user.id]);if(!order)return res.status(404).json({error:'Order not found.'});if(order.status!=='Delivered')return res.status(400).json({error:'You can rate the store after the order is delivered.'});
   const score=Number(req.body.score), review=typeof req.body.review==='string'?req.body.review.trim().slice(0,1000):'';if(!Number.isInteger(score)||score<1||score>5)return res.status(400).json({error:'Choose a rating from 1 to 5.'});
   await query(`INSERT INTO ratings(store_id,customer_id,order_id,reviewer_name,score,review,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(order_id,customer_id) WHERE order_id IS NOT NULL AND customer_id IS NOT NULL DO UPDATE SET score=EXCLUDED.score,review=EXCLUDED.review,created_at=EXCLUDED.created_at`,[order.store_id,req.user.id,order.id,req.user.name,score,review,nowIso()]);res.status(201).json({success:true});
 }));
+// Rider jobs
 app.get('/api/rider/jobs', auth, role('rider'), run(async(req,res)=>{
   const available=await many(`SELECT o.id FROM orders o WHERE o.store_id=$1 AND o.status='Ready for Pickup' AND o.rider_id IS NULL AND NOT EXISTS(SELECT 1 FROM rider_job_declines d WHERE d.order_id=o.id AND d.rider_id=$2) ORDER BY o.created_at`,[userStoreId(req.user),req.user.id]);
   const active=await many("SELECT id FROM orders WHERE rider_id=$1 AND store_id=$2 AND status IN ('Ready for Pickup','Out for Delivery') ORDER BY created_at",[req.user.id,userStoreId(req.user)]);
@@ -635,7 +657,7 @@ app.post('/api/orders/:id/decline-rider', auth, role('rider'), run(async(req,res
 app.get('/api/manager/riders', auth, role('store_manager'), run(async(req,res)=>{const riders=await many("SELECT id,name,email,store_id,is_online FROM users WHERE role='rider' AND store_id=$1 AND is_active=1 ORDER BY name",[userStoreId(req.user)]);res.json({riders});}));
 app.get('/api/manager/ratings', auth, role('store_manager'), run(async(req,res)=>{const ratings=await many('SELECT id,reviewer_name,score,review,created_at FROM ratings WHERE store_id=$1 AND is_visible=1 ORDER BY created_at DESC,id DESC',[userStoreId(req.user)]);res.json({ratings,summary:await ratingSummary(userStoreId(req.user))});}));
 
-// Super-admin account and store management.
+// Admin
 app.get('/api/admin/users', auth, role('superadmin'), run(async(_req,res)=>{res.json({users:await many(`SELECT id,name,email,role,store_id,is_active,is_online,created_at FROM users ORDER BY ${roleOrder},name`)});}));
 app.post('/api/admin/users', auth, role('superadmin'), run(async(req,res)=>{
   const name=typeof req.body.name==='string'?req.body.name.trim():'';const email=typeof req.body.email==='string'?req.body.email.trim().toLowerCase():'';const password=req.body.password;const roleName=req.body.role;const storeId=req.body.storeId==null||req.body.storeId===''?null:Number(req.body.storeId);
@@ -661,7 +683,7 @@ app.patch('/api/admin/settings', auth, role('superadmin'), run(async(req,res)=>{
 app.get('/api/admin/ratings', auth, role('superadmin'), run(async(_req,res)=>{res.json({ratings:await many('SELECT r.*,s.name AS store_name FROM ratings r JOIN stores s ON s.id=r.store_id ORDER BY r.created_at DESC,r.id DESC')});}));
 app.patch('/api/admin/ratings/:id', auth, role('superadmin'), run(async(req,res)=>{const rating=await one('SELECT * FROM ratings WHERE id=$1',[Number(req.params.id)]);if(!rating)return res.status(404).json({error:'Rating not found.'});const visible=Object.hasOwn(req.body,'isVisible')?Boolean(req.body.isVisible):Boolean(Number(rating.is_visible));await query('UPDATE ratings SET is_visible=$1 WHERE id=$2',[visible?1:0,rating.id]);res.json({success:true});}));
 
-// Group ordering remains available on PostgreSQL, including membership, item accumulation and checkout.
+// Group orders
 async function loadGroupOrder(groupId) {
   const g=await one('SELECT g.*,s.name AS store_name,s.location_name,h.name AS host_name FROM group_orders g JOIN stores s ON s.id=g.store_id JOIN users h ON h.id=g.host_customer_id WHERE g.id=$1',[groupId]);if(!g)return null;
   const [members,stored]=await Promise.all([many('SELECT u.id,u.name,gm.joined_at FROM group_order_members gm JOIN users u ON u.id=gm.customer_id WHERE gm.group_order_id=$1 ORDER BY gm.joined_at,u.id',[groupId]),many('SELECT gi.*,u.name AS member_name FROM group_order_items gi JOIN users u ON u.id=gi.customer_id WHERE gi.group_order_id=$1 ORDER BY gi.id',[groupId])]);
@@ -691,7 +713,7 @@ app.post('/api/group-orders/:id/checkout',auth,role('customer'),run(async(req,re
     for(const [pid,qty] of quantities){const current=await one('SELECT stock FROM products WHERE id=$1 FOR UPDATE',[pid],client);if(!current||Number(current.stock)<qty)throw new Error('A product does not have enough stock for the combined group quantity.');}
     const pricing=await discounts(lines.map(l=>({product:l.product,quantity:l.quantity})),memberCount,client);const deliveryFee=pricing.policy.deliveryFee,total=Math.max(0,pricing.subtotal-pricing.discountTotal)+deliveryFee;const now=nowIso();orderId=idToken();
     const payment=typeof req.body.paymentMethod==='string'&&req.body.paymentMethod.trim()?req.body.paymentMethod.trim():'Cash on delivery';const note=typeof req.body.orderNotes==='string'&&req.body.orderNotes.trim()?req.body.orderNotes.trim().slice(0,500):`Group order with ${memberCount} students.`;
-    // Group orders also remain unassigned until a rider accepts the offer or a manager assigns one.
+    // Group pickup
     await query(`INSERT INTO orders(id,customer_id,store_id,rider_id,status,subtotal,delivery_fee,total,discount_total,student_discount,group_discount,group_order_id,payment_method,delivery_address,order_notes,created_at,updated_at) VALUES($1,$2,$3,NULL,'Pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)`,[orderId,g.host_customer_id,g.store_id,pricing.subtotal,deliveryFee,total,pricing.discountTotal,pricing.studentDiscount,pricing.groupDiscount,g.id,payment,g.delivery_address,note,now],client);
     for(const l of lines)await query('INSERT INTO order_items(order_id,product_id,product_name,unit_price,quantity,line_total,ordered_by_customer_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[orderId,l.product.id,l.item.product_name,l.product.price,l.quantity,l.product.price*l.quantity,l.item.customer_id],client);
     for(const [pid,qty] of quantities){const upd=await query('UPDATE products SET stock=stock-$1 WHERE id=$2 AND stock >= $1',[qty,pid],client);if(upd.rowCount!==1)throw new Error('Stock changed while the group order was being placed. Refresh and try again.');}
@@ -701,7 +723,7 @@ app.post('/api/group-orders/:id/checkout',auth,role('customer'),run(async(req,re
 app.post('/api/group-orders/:id/leave',auth,role('customer'),run(async(req,res)=>{const g=await one("SELECT * FROM group_orders WHERE id=$1 AND status='OPEN'",[req.params.id]);if(!g)return res.status(404).json({error:'This group order is closed.'});if(!await assertGroupMember(g.id,req.user.id))return res.status(403).json({error:'You are not a member of this group order.'});if(Number(g.host_customer_id)===Number(req.user.id))return res.status(400).json({error:'The host must cancel the group instead of leaving it.'});await query('DELETE FROM group_order_items WHERE group_order_id=$1 AND customer_id=$2',[g.id,req.user.id]);await query('DELETE FROM group_order_members WHERE group_order_id=$1 AND customer_id=$2',[g.id,req.user.id]);await query('UPDATE group_orders SET updated_at=$1 WHERE id=$2',[nowIso(),g.id]);res.json({success:true});}));
 app.delete('/api/group-orders/:id',auth,role('customer'),run(async(req,res)=>{const g=await one("SELECT * FROM group_orders WHERE id=$1 AND status='OPEN'",[req.params.id]);if(!g)return res.status(404).json({error:'This group order is closed.'});if(Number(g.host_customer_id)!==Number(req.user.id))return res.status(403).json({error:'Only the group host can cancel this group order.'});await query("UPDATE group_orders SET status='CANCELLED',updated_at=$1 WHERE id=$2",[nowIso(),g.id]);res.json({success:true});}));
 
-// Return JSON for unmatched API paths instead of Express's default HTML 404.
+// Fallback routes
 app.use((req,res,next)=>{
   if (/^\/(?:api|auth)(?:\/|$)/.test(req.path)) {
     return res.status(404).json({

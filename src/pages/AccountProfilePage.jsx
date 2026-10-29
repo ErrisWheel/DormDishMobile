@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { BadgeCheck, Check, MailCheck, ShieldCheck, UserRound } from 'lucide-react';
 import { roleLabel } from '../lib/api.js';
 import { ImageUploadField } from '../components/ImageUploadField.jsx';
+import { MediaImage } from '../components/MediaImage.jsx';
 
+// Profile
 export function AccountProfilePage({ user, onSave, onVerify }) {
     const [name, setName] = useState(user.name || '');
     const [profileImageUrl, setProfileImageUrl] = useState(user.profile_image_url || '');
@@ -32,7 +34,7 @@ export function AccountProfilePage({ user, onSave, onVerify }) {
         <div className="page-stack profile-page">
             <div className="dashboard-section-heading"><div><span className="eyebrow">ACCOUNT SETTINGS</span><h1>My account</h1><p>Manage the name and photo shown across your DormDish workspace.</p></div></div>
             <section className="profile-identity-card">
-                <div className="profile-identity-avatar">{profileImageUrl ? <img src={profileImageUrl} alt="Account profile" /> : initials || <UserRound size={26} />}</div>
+                <div className="profile-identity-avatar">{profileImageUrl ? <MediaImage src={profileImageUrl} alt="Account profile" className="profile-avatar-media" fallbackText={initials || (user.name?.charAt(0)?.toUpperCase() || '?')} /> : initials || <UserRound size={26} />}</div>
                 <div className="profile-identity-copy"><span className="profile-member-label"><BadgeCheck size={15} /> {roleLabel(user.role)}</span><h2>{user.name}</h2><p>{user.email}</p></div>
                 <div className={`profile-secure-pill ${Number(user.email_verified) ? 'verified-pill' : ''}`}>{Number(user.email_verified) ? <BadgeCheck size={15} /> : <ShieldCheck size={15} />}{Number(user.email_verified) ? 'Email verified' : 'Email not verified'}</div>
             </section>

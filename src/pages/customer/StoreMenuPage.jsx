@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { ArrowLeft, Heart, MapPin, Plus, Search, SlidersHorizontal, Star } from 'lucide-react';
 import { money } from '../../lib/api.js';
+import { MediaImage } from '../../components/MediaImage.jsx';
 
+// Store menu
 export function StoreMenuPage({ store, products, onBack, onAdd, query, onQuery, favorites, onFavorite }) {
     const [budgetLimit, setBudgetLimit] = useState('');
     const [sortOrder, setSortOrder] = useState('recommended');
@@ -24,7 +26,7 @@ export function StoreMenuPage({ store, products, onBack, onAdd, query, onQuery, 
         <div className="page-stack">
             <button className="back-link" onClick={onBack}><ArrowLeft size={16} /> All stores</button>
             <section className="store-detail-hero">
-                <img src={store.image_url || '/images/hero-food.png'} alt={store.name} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/images/hero-food.png'; }} />
+                <MediaImage src={store.image_url || '/images/hero-food.png'} alt={store.name} className="store-detail-image" fallbackSrc="/images/hero-food.png" />
                 <div>
                     <span className="eyebrow">CAMPUS STORE</span>
                     <h1>{store.name}</h1>
@@ -39,20 +41,20 @@ export function StoreMenuPage({ store, products, onBack, onAdd, query, onQuery, 
 
             <section className="section-block">
                 <div className="dashboard-section-heading">
-                    <div><span className="eyebrow">MADE FOR YOUR BREAK</span><h2>Menu</h2><p>Product availability and stock update from your store.</p></div>
+                    <div><span className="eyebrow">MADE FOR YOUR BREAK</span><h2>Menu</h2><p>Product and stock information comes from SQLite.</p></div>
                     <label className="store-search"><Search size={17} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search menu" /></label>
                 </div>
 
                 <div className="menu-budget-controls" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 18 }}>
                     <label className="store-search">
                         <SlidersHorizontal size={17} />
-                        <select style={{ flex: 1, minWidth: 0, padding: '11px 0', border: 0, outline: 0, background: 'transparent', color: 'var(--text)', fontSize: 14 }} value={budgetLimit} onChange={(event) => setBudgetLimit(event.target.value)} aria-label="Filter meals by budget">
+                        <select style={{ flex: 1, minWidth: 0, padding: '11px 0', border: 0, outline: 0, background: 'transparent', color: 'var(--text)', fontSize: 11 }} value={budgetLimit} onChange={(event) => setBudgetLimit(event.target.value)} aria-label="Filter meals by budget">
                             <option value="">Any budget</option><option value="50">Up to ₱50</option><option value="100">Up to ₱100</option><option value="150">Up to ₱150</option>
                         </select>
                     </label>
                     <label className="store-search">
                         <span>Sort</span>
-                        <select style={{ flex: 1, minWidth: 0, padding: '11px 0', border: 0, outline: 0, background: 'transparent', color: 'var(--text)', fontSize: 14 }} value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} aria-label="Sort menu">
+                        <select style={{ flex: 1, minWidth: 0, padding: '11px 0', border: 0, outline: 0, background: 'transparent', color: 'var(--text)', fontSize: 11 }} value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} aria-label="Sort menu">
                             <option value="recommended">Recommended</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option>
                         </select>
                     </label>
@@ -62,7 +64,7 @@ export function StoreMenuPage({ store, products, onBack, onAdd, query, onQuery, 
                     <div className="product-grid role-product-grid">
                         {filtered.map((product) => (
                             <article className="product-card role-product-card" key={product.id}>
-                                <img className="product-image" src={product.image_url || '/images/hero-food.png'} alt={product.name} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/images/hero-food.png'; }} />
+                                <MediaImage className="product-image" src={product.image_url || '/images/hero-food.png'} alt={product.name} fallbackSrc="/images/hero-food.png" />
                                 <button className={`role-favorite-button ${favorites.includes(product.id) ? 'active' : ''}`} onClick={() => onFavorite(product.id)} aria-label={`Toggle favorite for ${product.name}`}>
                                     <Heart size={17} fill={favorites.includes(product.id) ? 'currentColor' : 'none'} />
                                 </button>

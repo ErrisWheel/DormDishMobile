@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 
+// Database connection
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const dataDirectory = path.join(currentDirectory, 'data');
 const databasePath = process.env.DORMDISH_DB_PATH || path.join(dataDirectory, 'dormdish.sqlite');
@@ -707,7 +708,16 @@ export function getOrderDetails(orderId) {
     `).get(orderId, order.customer_id) || null;
     order.rider_location = db.prepare('SELECT order_id, rider_id, latitude, longitude, accuracy_m, recorded_at FROM rider_locations WHERE order_id = ?').get(orderId) || null;
     const proof = db.prepare('SELECT media_id, delivered_at FROM delivery_proofs WHERE order_id = ?').get(orderId);
-    const apiBase = String(process.env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+    let apiBase = String(process.env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+    if (apiBase) {
+        try {
+            const url = new URL(apiBase);
+            if (url.hostname.toLowerCase() === 'dormdish-api.onrender.com') url.hostname = 'dormdishmobile.onrender.com';
+            const pathname = url.pathname.replace(/\/+$/, '');
+            url.pathname = /\/api$/i.test(pathname) ? pathname : `${pathname}/api`;
+            apiBase = url.toString().replace(/\/+$/, '');
+        } catch {}
+    }
     order.delivery_proof_url = proof ? `${apiBase || '/api'}/media/${proof.media_id}` : null;
 
     return order;

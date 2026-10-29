@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, BadgeCheck, MailCheck, RefreshCw, ShieldCheck } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
 
+// Email verification
+
 export function VerificationPage({ token = '', user = null, onBack, onDone }) {
     const [busy, setBusy] = useState(Boolean(token));
     const [message, setMessage] = useState('');

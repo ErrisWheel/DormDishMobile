@@ -1,6 +1,8 @@
 import { ArrowUpRight, MapPin, Plus, Search, Star, Store, TrendingUp } from 'lucide-react';
 import { money } from '../../lib/api.js';
+import { MediaImage } from '../../components/MediaImage.jsx';
 
+// Recommendations
 function MealRecommendations({ title, description, products, onAdd, icon: Icon }) {
     if (!products.length) return null;
 
@@ -17,7 +19,7 @@ function MealRecommendations({ title, description, products, onAdd, icon: Icon }
             <div className="product-grid role-product-grid">
                 {products.map((product) => (
                     <article className="product-card role-product-card" key={product.id}>
-                        <img className="product-image" src={product.image_url || '/images/hero-food.png'} alt={product.name} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/images/hero-food.png'; }} />
+                        <MediaImage className="product-image" src={product.image_url || '/images/hero-food.png'} alt={product.name} fallbackSrc="/images/hero-food.png" />
                         <div className="product-details">
                             <div className="product-meta">
                                 <span className="product-category">{product.store_name}</span>
@@ -43,6 +45,7 @@ function MealRecommendations({ title, description, products, onAdd, icon: Icon }
     );
 }
 
+// Stores
 export function CustomerHomePage({ stores, products = [], orders = [], onOpenStore, onAdd, search, onSearch }) {
     const filteredStores = stores.filter((store) => `${store.name} ${store.description}`.toLowerCase().includes(search.toLowerCase()));
     const availableProducts = products.filter((product) => Boolean(product.is_available) && Number(product.stock) > 0);
@@ -111,7 +114,7 @@ export function CustomerHomePage({ stores, products = [], orders = [], onOpenSto
                         {filteredStores.map((store, index) => (
                             <article className="store-card" key={store.id}>
                                 <button className="store-image-button" onClick={() => onOpenStore(store)} aria-label={`Open ${store.name}`}>
-                                    <img src={store.image_url || '/images/hero-food.png'} alt={store.name} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/images/hero-food.png'; }} />
+                                    <MediaImage src={store.image_url || '/images/hero-food.png'} alt={store.name} className="store-card-image" fallbackSrc="/images/hero-food.png" />
                                     {index === 0 && <span className="recommended-pill">Top rated</span>}
                                 </button>
                                 <div className="store-card-body">

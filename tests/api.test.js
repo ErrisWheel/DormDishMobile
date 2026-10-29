@@ -1,3 +1,4 @@
+// API tests
 import 'dotenv/config';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -12,24 +13,14 @@ const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'dormdish-api-t
 const databasePath = path.join(temporaryDirectory, 'test.sqlite');
 const port = 42000 + Math.floor(Math.random() * 10000);
 const baseUrl = `http://127.0.0.1:${port}/api`;
-// These integration tests must always use an isolated temporary SQLite database.
-// Do not let a developer's local Neon DATABASE_URL redirect the test server to production.
-const testPasswords = {
-    admin: process.env.DEMO_SUPERADMIN_PASSWORD || 'Admin123!',
-    manager: process.env.DEMO_MANAGER_PASSWORD || 'Manager123!',
-    customer: process.env.DEMO_CUSTOMER_PASSWORD || 'Customer123!',
-    rider: process.env.DEMO_RIDER_PASSWORD || 'Rider123!'
-};
 const childEnvironment = {
     ...process.env,
     PORT: String(port),
-    JWT_SECRET: 'automated-test-secret-value-with-over-24-characters',
-    DORMDISH_DB_PATH: databasePath,
     DATABASE_URL: '',
-    DEMO_SUPERADMIN_PASSWORD: testPasswords.admin,
-    DEMO_MANAGER_PASSWORD: testPasswords.manager,
-    DEMO_CUSTOMER_PASSWORD: testPasswords.customer,
-    DEMO_RIDER_PASSWORD: testPasswords.rider
+    SMTP_USER: '',
+    SMTP_PASS: '',
+    JWT_SECRET: 'automated-test-secret-value-with-over-24-characters',
+    DORMDISH_DB_PATH: databasePath
 };
 let apiProcess;
 let customerToken;
@@ -88,11 +79,11 @@ before(async () => {
     }
 
     assert.equal(ready, true, 'API should become ready');
-    customerToken = await login('customer@dormdish.test', testPasswords.customer);
-    alphaManagerToken = await login('manager.alpha@dormdish.test', testPasswords.manager);
-    betaManagerToken = await login('manager.beta@dormdish.test', testPasswords.manager);
-    superadminToken = await login('superadmin@dormdish.test', testPasswords.admin);
-    riderToken = await login('rider@dormdish.test', testPasswords.rider);
+    customerToken = await login('customer@dormdish.test', process.env.DEMO_CUSTOMER_PASSWORD);
+    alphaManagerToken = await login('manager.alpha@dormdish.test', process.env.DEMO_MANAGER_PASSWORD);
+    betaManagerToken = await login('manager.beta@dormdish.test', process.env.DEMO_MANAGER_PASSWORD);
+    superadminToken = await login('superadmin@dormdish.test', process.env.DEMO_SUPERADMIN_PASSWORD);
+    riderToken = await login('rider@dormdish.test', process.env.DEMO_RIDER_PASSWORD);
     const betaProducts = await request('/products?storeId=2');
     const alphaProducts = await request('/products?storeId=1');
     betaProductId = betaProducts.body.products[0].id;

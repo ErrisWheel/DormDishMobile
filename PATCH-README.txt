@@ -10,3 +10,6 @@ DormDish feature patch
 The provided Gmail app password has been exposed in chat. Revoke it and create a fresh Google App Password; put it only into the Render Web Service SMTP_PASS environment variable.
 
 GPS updates require location permission and the rider app to remain in the foreground. The rider confirms delivery with a camera proof photo. Photo bytes are stored in Neon BYTEA when DATABASE_URL is configured, or local SQLite BLOB in local development.
+
+
+Recent UI fixes: superadmins can register stores and assign managers; store managers can no longer assign riders; riders can claim Ready for Pickup jobs from their own dashboard. Image URLs are normalized to the configured API host and failed previews use a visible fallback. Gmail SMTP errors now include a diagnostic code in the API response and Render logs.

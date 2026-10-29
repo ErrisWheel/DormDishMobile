@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { LocateFixed, MapPin, RefreshCw } from 'lucide-react';
 import { apiRequest, formatDate } from '../lib/api.js';
 
+// Rider map
+
 function mapEmbedUrl(location) {
     if (!location) return '';
     const lat = Number(location.latitude);

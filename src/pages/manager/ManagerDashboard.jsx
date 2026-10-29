@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Bike, Check, Clock3, Edit3, Package, Plus, RefreshCw, Star, Trash2, TrendingUp, X } from 'lucide-react';
 import { apiRequest, formatDate, money } from '../../lib/api.js';
 import { ImageUploadField } from '../../components/ImageUploadField.jsx';
+import { MediaImage } from '../../components/MediaImage.jsx';
 
 const allowedNext = {
     Pending: ['Confirmed', 'Cancelled'],
     Confirmed: ['Preparing', 'Cancelled'],
     Preparing: ['Ready for Pickup', 'Cancelled'],
-    // The rider—not the store—confirms pickup and starts GPS tracking.
+    // Pickup
     'Ready for Pickup': ['Cancelled'],
-    // Managers may add ETA/notes to an active trip, but cannot complete it.
+    // Delivery
     'Out for Delivery': ['Cancelled'],
     Delivered: [],
     Cancelled: []
@@ -38,21 +39,20 @@ function toDateTimeLocal(value) {
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-function ManagerOrderCard({ order, riders, onUpdate, onAssignRider }) {
+// Orders
+function ManagerOrderCard({ order, onUpdate }) {
     const [status, setStatus] = useState(order.status);
     const [etaMinutes, setEtaMinutes] = useState(order.eta_minutes ?? '');
     const [note, setNote] = useState('');
     const [locationLabel, setLocationLabel] = useState(order.tracking?.[0]?.location_label || '');
-    const [riderId, setRiderId] = useState(order.rider_id ? String(order.rider_id) : '');
     const [saving, setSaving] = useState(false);
     const options = useMemo(() => [...new Set([order.status, ...(allowedNext[order.status] || [])])], [order.status]);
 
     useEffect(() => {
         setStatus(order.status);
         setEtaMinutes(order.eta_minutes ?? '');
-        setRiderId(order.rider_id ? String(order.rider_id) : '');
         setLocationLabel(order.tracking?.[0]?.location_label || '');
-    }, [order.status, order.eta_minutes, order.rider_id, order.tracking?.[0]?.id]);
+    }, [order.status, order.eta_minutes, order.tracking?.[0]?.id]);
 
     async function saveProgress() {
         setSaving(true);
@@ -119,22 +119,7 @@ function ManagerOrderCard({ order, riders, onUpdate, onAssignRider }) {
                     <button className="primary-button" disabled={saving} onClick={saveProgress}>
                         <Check size={16} /> {saving ? 'Saving…' : 'Save tracking update'}
                     </button>
-                    <label className="assign-rider-field">Assign rider
-                        <select
-                            value={riderId}
-                            onChange={async (event) => {
-                                const next = event.target.value;
-                                setRiderId(next);
-                                try {
-                                    await onAssignRider(order.id, next || null);
-                                } catch {
-                                }
-                            }}
-                        >
-                            <option value="">Unassigned</option>
-                            {riders.map((rider) => <option key={rider.id} value={rider.id}>{rider.name}</option>)}
-                        </select>
-                    </label>
+                    {order.status === 'Ready for Pickup' && !order.rider_id && <span className="muted-copy">Riders claim this pickup from their own dashboard.</span>}
                 </div>
             </div>
             {order.tracking?.length > 0 && (
@@ -147,10 +132,10 @@ function ManagerOrderCard({ order, riders, onUpdate, onAssignRider }) {
     );
 }
 
+// Manager dashboard
 export function ManagerDashboard({ user, page, onToast }) {
     const [products, setProducts] = useState([]);
     const [orders, setOrders] = useState([]);
-    const [riders, setRiders] = useState([]);
     const [ratings, setRatings] = useState([]);
     const [ratingSummary, setRatingSummary] = useState({ rating: null, rating_count: 0 });
     const [productForm, setProductForm] = useState(emptyProduct);
@@ -163,16 +148,14 @@ export function ManagerDashboard({ user, page, onToast }) {
         if (!silent) setLoading(true);
 
         try {
-            const [productResult, orderResult, riderResult, ratingResult] = await Promise.all([
+            const [productResult, orderResult, ratingResult] = await Promise.all([
                 apiRequest(`/products?storeId=${user.store_id}`),
                 apiRequest('/orders'),
-                apiRequest('/manager/riders'),
                 apiRequest('/manager/ratings')
             ]);
 
             setProducts(productResult.products);
             setOrders(orderResult.orders);
-            setRiders(riderResult.riders);
             setRatings(ratingResult.ratings);
             setRatingSummary(ratingResult.summary);
             setError('');
@@ -278,19 +261,6 @@ export function ManagerDashboard({ user, page, onToast }) {
         }
     }
 
-    async function assignRider(orderId, riderId) {
-        try {
-            await apiRequest(`/orders/${encodeURIComponent(orderId)}/assign-rider`, {
-                method: 'PATCH',
-                body: { riderId }
-            });
-            onToast('Rider assignment updated.');
-            await refresh();
-        } catch (requestError) {
-            onToast(requestError.message);
-            throw requestError;
-        }
-    }
 
     const today = new Date().toDateString();
     const deliveredToday = orders.filter((order) =>
@@ -328,7 +298,7 @@ export function ManagerDashboard({ user, page, onToast }) {
                 <div className="stat-card"><span>Products</span><strong>{products.length}</strong><small>In your store catalog</small></div>
                 <div className="stat-card"><span>Active orders</span><strong>{orders.filter((order) => !['Delivered', 'Cancelled'].includes(order.status)).length}</strong><small>Awaiting completion</small></div>
                 <div className="stat-card"><span>Store rating</span><strong>{ratingSummary.rating ? Number(ratingSummary.rating).toFixed(1) : 'New'}</strong><small>{ratingSummary.rating_count} reviews</small></div>
-                <div className="stat-card"><span>Assigned riders</span><strong>{riders.length}</strong><small>Available for your store</small></div>
+                <div className="stat-card"><span>Pickups waiting</span><strong>{orders.filter((order) => order.status === 'Ready for Pickup' && !order.rider_id).length}</strong><small>Riders claim pickups themselves</small></div>
             </div>
 
             {page === 'manager-dashboard' && (
@@ -383,14 +353,14 @@ export function ManagerDashboard({ user, page, onToast }) {
 
             {page === 'manager-products' && (
                 <section className="dashboard-panel">
-                    <div className="panel-heading"><div><h2>Your products</h2><p>{products.length} product records from SQLite</p></div></div>
+                    <div className="panel-heading"><div><h2>Your products</h2><p>{products.length} product records in DormDish</p></div></div>
                     {loading ? <p className="muted-copy">Loading products…</p> : products.length ? (
                         <div className="admin-table-wrap">
                             <table className="admin-table">
                                 <thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Availability</th><th>Actions</th></tr></thead>
                                 <tbody>{products.map((product) => (
                                     <tr key={product.id}>
-                                        <td><div className="table-product"><img src={product.image_url} alt="" /><div><strong>{product.name}</strong><small>{product.category}</small></div></div></td>
+                                        <td><div className="table-product"><MediaImage src={product.image_url} alt="" className="manager-product-thumbnail" fallbackSrc="/images/hero-food.png" /><div><strong>{product.name}</strong><small>{product.category}</small></div></div></td>
                                         <td>
                                             {product.promo_active ? <><strong>{money(product.price)}</strong> <del>{money(product.regular_price)}</del><small className="stock-good">{product.promo_label || 'Promotional price'}</small></> : money(product.price)}
                                             {product.is_promoted && !product.promo_active && <small className="muted-copy">Promotion scheduled/ended</small>}
@@ -410,14 +380,14 @@ export function ManagerDashboard({ user, page, onToast }) {
                 <section className="section-block">
                     <div className="dashboard-section-heading"><div><h2>Store orders</h2><p>Set an estimated arrival and add simulated tracking updates.</p></div></div>
                     {loading ? <p className="muted-copy">Loading orders…</p> : orders.length ? (
-                        <div className="order-list">{orders.map((order) => <ManagerOrderCard key={order.id} order={order} riders={riders} onUpdate={updateOrder} onAssignRider={assignRider} />)}</div>
+                        <div className="order-list">{orders.map((order) => <ManagerOrderCard key={order.id} order={order} onUpdate={updateOrder} />)}</div>
                     ) : <div className="dashboard-empty"><Package size={26} /><h3>No orders yet</h3><p>New customer orders will appear here.</p></div>}
                 </section>
             )}
 
             {page === 'manager-ratings' && (
                 <section className="dashboard-panel">
-                    <div className="panel-heading"><div><h2>Customer ratings</h2><p>Rating averages are calculated from visible SQLite rating records.</p></div><span className="store-rating"><Star size={15} fill="currentColor" /> {ratingSummary.rating ? Number(ratingSummary.rating).toFixed(1) : 'New'}</span></div>
+                    <div className="panel-heading"><div><h2>Customer ratings</h2><p>Rating averages use customer ratings that are visible to shoppers.</p></div><span className="store-rating"><Star size={15} fill="currentColor" /> {ratingSummary.rating ? Number(ratingSummary.rating).toFixed(1) : 'New'}</span></div>
                     {ratings.length ? (
                         <div className="rating-list">{ratings.map((rating) => <article className="rating-row" key={rating.id}><div className="rating-row-score"><Star size={16} fill="currentColor" /> {rating.score}/5</div><div><strong>{rating.reviewer_name}</strong><p>{rating.review || 'No written review.'}</p><small>{formatDate(rating.created_at)}</small></div></article>)}</div>
                     ) : <div className="dashboard-empty"><Star size={26} /><h3>No ratings yet</h3><p>Customer reviews will appear after delivered orders.</p></div>}

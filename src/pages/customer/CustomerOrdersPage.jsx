@@ -3,6 +3,7 @@ import { Bike, CheckCircle2, Clock3, ExternalLink, MapPin, Navigation, PackageCh
 import { apiRequest, formatDate, money } from '../../lib/api.js';
 import { deliveryDirectionsUrl, deliveryDestinationUrl, storeMapUrl } from '../../lib/maps.js';
 import { LiveRiderMap } from '../../components/LiveRiderMap.jsx';
+import { MediaImage } from '../../components/MediaImage.jsx';
 
 const progressStatuses = ['Pending', 'Confirmed', 'Preparing', 'Ready for Pickup', 'Out for Delivery', 'Delivered'];
 
@@ -16,6 +17,7 @@ function etaLabel(order) {
     return `${remaining} min remaining`;
 }
 
+// Orders
 export function CustomerOrdersPage({ orders, onRefresh, onBrowse, onToast }) {
     const [ratingForms, setRatingForms] = useState({});
     const [savingRating, setSavingRating] = useState('');
@@ -134,7 +136,7 @@ export function CustomerOrdersPage({ orders, onRefresh, onBrowse, onToast }) {
 
                                 {['Out for Delivery', 'Delivered'].includes(order.status) && <LiveRiderMap orderId={order.id} status={order.status} role="customer" />}
 
-                                {order.status === 'Delivered' && order.delivery_proof_url && <div className="delivery-proof-customer"><strong>Rider delivery photo</strong><img src={order.delivery_proof_url} alt="Rider delivery confirmation" /></div>}
+                                {order.status === 'Delivered' && order.delivery_proof_url && <div className="delivery-proof-customer"><strong>Rider delivery photo</strong><MediaImage src={order.delivery_proof_url} alt="Rider delivery confirmation" className="delivery-proof-media" fallbackText="Photo unavailable" fallbackSrc="" /></div>}
 
                                 {order.status === 'Delivered' && order.can_rate !== false && !order.rating && (
                                     <div className="rating-form">

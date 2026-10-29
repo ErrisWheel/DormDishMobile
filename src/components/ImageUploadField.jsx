@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Camera, ImagePlus, UploadCloud } from 'lucide-react';
-import { apiRequest } from '../lib/api.js';
+import { apiRequest, resolveImageUrl } from '../lib/api.js';
+import { MediaImage } from './MediaImage.jsx';
 
 function fileAsDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -11,6 +12,7 @@ function fileAsDataUrl(file) {
     });
 }
 
+// Uploads
 export function ImageUploadField({ kind, value, onChange, label = 'Image', help = 'JPG, PNG, WEBP or AVIF · max 5 MB', className = '' }) {
     const chooseRef = useRef(null);
     const cameraRef = useRef(null);
@@ -35,7 +37,7 @@ export function ImageUploadField({ kind, value, onChange, label = 'Image', help 
                 method: 'POST',
                 body: { filename: file.name || `${kind}-image`, mimeType: file.type, data }
             });
-            onChange(result.url);
+            onChange(resolveImageUrl(result.url));
         } catch (uploadError) {
             setError(uploadError.message || 'The image upload failed.');
         } finally {
@@ -53,7 +55,7 @@ export function ImageUploadField({ kind, value, onChange, label = 'Image', help 
     return (
         <div className={`image-upload-field ${className}`} onDragOver={(event) => event.preventDefault()} onDrop={dropFile}>
             <div className="image-upload-preview">
-                {value ? <img src={value} alt={`${label} preview`} /> : <ImagePlus size={25} />}
+                {value ? <MediaImage src={value} alt={`${label} preview`} fallbackSrc="/images/hero-food.png" /> : <ImagePlus size={25} />}
             </div>
             <div className="image-upload-copy">
                 <strong>{label}</strong>

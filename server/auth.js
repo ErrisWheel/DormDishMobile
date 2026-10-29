@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { db } from './database.js';
 
+// Authentication
 const jwtSecret = process.env.JWT_SECRET;
 
 if (!jwtSecret || jwtSecret.length < 24) {

@@ -13,10 +13,12 @@ import { AdminDashboard } from './pages/admin/AdminDashboard.jsx';
 import { RiderDashboard } from './pages/rider/RiderDashboard.jsx';
 import { VerificationPage } from './pages/VerificationPage.jsx';
 import { AccountProfilePage } from './pages/AccountProfilePage.jsx';
+import { MediaImage } from './components/MediaImage.jsx';
 import './styles.css';
 import './role-styles.css';
 import './enhancements.css';
 
+// Navbar
 const navigation = {
     customer: [
         { page: 'customer-home', label: 'Stores', icon: Store },
@@ -566,7 +568,7 @@ function App() {
                     <button className="icon-button theme-toggle" onClick={() => setDark((current) => !current)} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
                     <button className="profile-chip" onClick={() => navigate(isCustomer ? 'customer-profile' : 'account-profile')}>
 
-                        <span className="avatar">{user.profile_image_url ? <img src={user.profile_image_url} alt="" /> : user.name.trim().charAt(0).toUpperCase()}</span>
+                        <span className="avatar">{user.profile_image_url ? <MediaImage src={user.profile_image_url} alt="" className="avatar-media" fallbackText={user.name.trim().charAt(0).toUpperCase() || '?'} /> : user.name.trim().charAt(0).toUpperCase() || '?'}</span>
                         <span className="profile-chip-name">{user.name}</span>
                     </button>
                     <button className="icon-button" onClick={handleLogout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
@@ -600,6 +602,7 @@ function App() {
                     <div className="sidebar-footer">© 2026 DormDish PH<br /><span>Local SQLite school demo</span></div>
                 </aside>
                 <main className="main-content">
+                    {/* Routes */}
                     <div key={page} className="page-transition">
                         {isCustomer && page === 'customer-home' && <CustomerHomePage stores={stores} products={products} orders={orders} onOpenStore={openStore} onAdd={addToCart} search={storeSearch} onSearch={setStoreSearch} />}
                         {isCustomer && page === 'customer-menu' && <StoreMenuPage store={selectedStore} products={storeProducts} onBack={() => navigate('customer-home')} onAdd={addToCart} query={menuSearch} onQuery={setMenuSearch} favorites={favorites} onFavorite={toggleFavorite} />}
@@ -612,7 +615,7 @@ function App() {
                                 <div className="product-grid role-product-grid">
                                     {products.filter((product) => favorites.includes(product.id)).map((product) => (
                                         <article className="product-card role-product-card" key={product.id}>
-                                            <img className="product-image" src={product.image_url} alt={product.name} />
+                                            <MediaImage className="product-image" src={product.image_url} alt={product.name} fallbackSrc="/images/hero-food.png" />
                                             <div className="product-details">
                                                 <span className="product-category">{product.store_name}</span>
                                                 <h3>{product.name}</h3><p>{product.description}</p>

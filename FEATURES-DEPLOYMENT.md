@@ -1,6 +1,6 @@
 # DormDish feature deployment notes
 
-This patch preserves the existing React/Vite screens and adds shared rider GPS, rider-confirmed delivery with a proof photo, database-backed image uploads, demo-account provisioning, and email verification.
+This patch keeps the existing React/Vite screens and adds superadmin store creation and manager assignment, rider-claimed pickup jobs, shared GPS, rider photo proof, database-backed images, demo-account provisioning, and email verification.
 
 ## 1. Install dependencies and commit the lockfile
 
@@ -72,7 +72,7 @@ The managers are assigned to the first three active stores ordered by ID, and th
 
 ## 4. Rider GPS and delivery proof
 
-1. The store manager moves an order through `Confirmed`, `Preparing`, and `Ready for Pickup`, and assigns a rider. The manager cannot start the live trip or mark an order delivered.
+1. The store manager moves an order through `Confirmed`, `Preparing`, and `Ready for Pickup`. The order remains unassigned until a rider claims it. Store staff cannot assign a rider.
 2. The assigned rider taps **Confirm pickup & start GPS** after physically collecting the order.
 3. While the rider dashboard stays active, the phone/browser's Geolocation API reports coordinates to `POST /api/orders/:id/location`. The customer order screen fetches the same saved coordinate every four seconds and shows it on the embedded map with an update time.
 4. The rider taps **Take delivery proof photo** after handoff; the mobile device opens its camera capture UI. The image is uploaded to the backend, and only then does the order change to `Delivered`.
@@ -90,7 +90,7 @@ The product, store, and profile controls offer file selection and camera capture
 - Logged-in users in every role can tap **Verify email** beside their role, or open their account profile. Customers can also open verification from **My profile**.
 - The backend emails a random single-use token. Only the SHA-256 hash is stored in the database. The token expires after 24 hours, and resend requests are throttled to once per minute.
 - The email link opens the static-site React page at `/?verify=...`, which calls `GET /api/auth/verify` to verify the account.
-- If the verification button returns a 503, check `SMTP_USER`, `SMTP_PASS`, and `PUBLIC_WEB_URL`. If sending returns 502, review the Web Service logs for the SMTP error.
+- If the verification button returns a 503, check `SMTP_USER`, `SMTP_PASS`, and `PUBLIC_WEB_URL`. If sending returns 502, review the Web Service logs for the SMTP error code. Gmail App Password spaces are stripped automatically; the password must still be a valid, current App Password for `SMTP_USER`.
 
 This adds verification and a visible verified state; it does not block sign-in or orders for unverified accounts.
 

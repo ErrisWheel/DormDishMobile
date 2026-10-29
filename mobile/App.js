@@ -23,7 +23,7 @@ function getOrigin(value) {
 
 function normalizeWebsiteUrl(value) {
   const origin = getOrigin(value);
-  // Expo must load the frontend host, never the API host or a stale deep link.
+  // Expo URL
   if (!origin || origin === API_ORIGIN) return DEFAULT_WEBSITE_URL;
   return `${origin}/`;
 }
@@ -45,10 +45,7 @@ const TEXT = '#24251f';
 const MUTED = '#85877f';
 const ACCENT = '#e84335';
 
-// Runs within the remote page. API fetches are delegated to React Native's
-// network stack so a WebView-specific browser CORS/preflight failure cannot
-// prevent the app from reaching its own API. Requests are restricted to the
-// single known HTTPS API origin and /api/ path.
+// API bridge
 const INJECTED_APP_SCRIPT = String.raw`
 (function () {
   try {
@@ -152,7 +149,7 @@ const INJECTED_APP_SCRIPT = String.raw`
       });
     };
   } catch (error) {
-    // Never stop the hosted website from rendering if an injection feature fails.
+    // Injection fallback
   }
   return true;
 })();
@@ -218,7 +215,7 @@ export default function App() {
     const targetPath = getPathname(targetUrl);
     const responsePayload = { id: message.id };
 
-    // Never allow the WebView bridge to become an arbitrary native HTTP proxy.
+    // Request guard
     if (getOrigin(targetUrl) !== API_ORIGIN || !targetPath.startsWith('/api/') ||
         !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method)) {
       responsePayload.status = 403;
@@ -235,9 +232,7 @@ export default function App() {
         const requestInit = { method, headers: safeHeaders };
         if (message.body != null && !['GET', 'HEAD'].includes(method)) requestInit.body = String(message.body);
 
-        // Some deployed API builds expose routes at /auth/* while newer builds
-        // expose them at /api/auth/*. Retry only a framework-level HTML 404;
-        // never retry a normal JSON 404 from a matched application route.
+        // Route fallback
         const isRouteHtml404 = (status, contentType, body) => {
           if (Number(status) !== 404) return false;
           const type = String(contentType || '').toLowerCase();
