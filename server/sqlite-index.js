@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import nodemailer from 'nodemailer';
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -32,7 +33,33 @@ const nextStatuses = {
 };
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '8mb' }));
+app.use(express.json({ limit: '10mb' }));
+
+
+const smtpUser = process.env.SMTP_USER || '';
+const smtpPass = process.env.SMTP_PASS || '';
+const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT || 465),
+    secure: String(process.env.SMTP_SECURE ?? 'true').toLowerCase() !== 'false',
+    auth: { user: smtpUser, pass: smtpPass }
+}) : null;
+const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+const publicApiUrl = String(process.env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const verificationConfigured = () => Boolean(mailer && publicWebUrl);
+async function sendVerificationMessage(user, rawToken) {
+    if (!verificationConfigured()) throw new Error('Email verification is not configured. Set SMTP_USER, SMTP_PASS, and PUBLIC_WEB_URL.');
+    const link = `${publicWebUrl}/?verify=${encodeURIComponent(rawToken)}`;
+    const safeName = String(user.name || 'there').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    await mailer.sendMail({
+        from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+        to: user.email,
+        subject: 'Verify your DormDish account',
+        text: `Hi ${user.name},\n\nVerify your DormDish account using this link (expires in 24 hours):\n${link}\n\nIf you did not request this email, you can ignore it.`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#17231c"><h1>Verify your DormDish account</h1><p>Hi ${safeName},</p><p>Confirm your email address using the secure link below.</p><p><a href="${link}" style="display:inline-block;background:#176b45;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Verify account</a></p><p>This link expires in 24 hours. If you did not request it, ignore this email.</p></div>`
+    });
+}
 
 function cleanUser(user) {
     if (!user) return user;
@@ -179,7 +206,7 @@ function logTracking(orderId, updatedBy, status, note, locationLabel, etaAt) {
     `).run(orderId, updatedBy, status, note, locationLabel || '', etaAt || null, new Date().toISOString());
 }
 
-const API_BUILD = 'dormdish-login-route-fix-2026-10-29';
+const API_BUILD = 'dormdish-live-gps-proof-verification-2026-10-29';
 app.get('/api/health', (req, res) => {
     res.json({
         ok: true,
@@ -187,6 +214,7 @@ app.get('/api/health', (req, res) => {
         service: 'dormdish-api',
         build: API_BUILD,
         loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
+        features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof'],
         timestamp: new Date().toISOString()
     });
 });
@@ -214,16 +242,45 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     res.json({ user: req.user });
 });
 
-app.patch('/api/auth/profile', requireAuth, allowRoles('customer'), (req, res) => {
-    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
-
-    if (name.length < 2 || name.length > 100) {
-        return res.status(400).json({ error: 'Name must contain between 2 and 100 characters.' });
-    }
-
-    db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, req.user.id);
-    const user = db.prepare('SELECT id, name, email, role, store_id, is_active, created_at FROM users WHERE id = ?').get(req.user.id);
+app.patch('/api/auth/profile', requireAuth, (req, res) => {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : req.user.name;
+    const profileImageUrl = Object.hasOwn(req.body, 'profileImageUrl') ? String(req.body.profileImageUrl || '').trim() : (req.user.profile_image_url || '');
+    if (name.length < 2 || name.length > 100) return res.status(400).json({ error: 'Name must contain between 2 and 100 characters.' });
+    if (profileImageUrl.length > 500 || (profileImageUrl && !/^https:\/\//i.test(profileImageUrl) && !profileImageUrl.startsWith('/'))) return res.status(400).json({ error: 'Choose a valid profile photo.' });
+    db.prepare('UPDATE users SET name = ?, profile_image_url = ? WHERE id = ?').run(name, profileImageUrl, req.user.id);
+    const user = db.prepare('SELECT id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at FROM users WHERE id = ?').get(req.user.id);
     res.json({ user });
+});
+
+app.post('/api/auth/verification/send', requireAuth, async (req, res) => {
+    const user = db.prepare('SELECT id,name,email,email_verified,email_verification_sent_at FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found.' });
+    if (Number(user.email_verified)) return res.json({ success: true, alreadyVerified: true, message: 'Your email is already verified.' });
+    if (!verificationConfigured()) return res.status(503).json({ error: 'Email verification is not configured. Set SMTP_USER, SMTP_PASS, and PUBLIC_WEB_URL in the backend environment.' });
+    if (user.email_verification_sent_at && Date.now() - Date.parse(user.email_verification_sent_at) < 60000) return res.status(429).json({ error: 'Wait one minute before requesting another verification email.' });
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare('UPDATE users SET email_verification_token_hash = ?, email_verification_expires_at = ?, email_verification_sent_at = ? WHERE id = ?').run(sha256(rawToken), expiresAt, new Date().toISOString(), user.id);
+    try { await sendVerificationMessage(user, rawToken); }
+    catch (error) {
+        db.prepare('UPDATE users SET email_verification_token_hash = NULL, email_verification_expires_at = NULL WHERE id = ?').run(user.id);
+        console.error('Could not send verification email:', error.message);
+        return res.status(502).json({ error: 'Could not send verification email. Check SMTP settings and Render logs.' });
+    }
+    return res.json({ success: true, message: `Verification email sent to ${user.email}.` });
+});
+
+app.get('/api/auth/verify', (req, res) => {
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    if (!/^[a-f0-9]{64}$/i.test(token)) return res.status(400).json({ error: 'That verification link is invalid or incomplete.' });
+    const user = db.prepare('SELECT id,email,email_verification_expires_at FROM users WHERE email_verification_token_hash = ?').get(sha256(token));
+    if (!user) return res.status(400).json({ error: 'This verification link is invalid or has already been used. Request a fresh link.' });
+    if (!user.email_verification_expires_at || Date.parse(user.email_verification_expires_at) < Date.now()) {
+        db.prepare('UPDATE users SET email_verification_token_hash = NULL, email_verification_expires_at = NULL WHERE id = ?').run(user.id);
+        return res.status(410).json({ error: 'This verification link has expired. Sign in and request a new one.' });
+    }
+    db.prepare('UPDATE users SET email_verified = 1,email_verification_token_hash = NULL,email_verification_expires_at = NULL WHERE id = ?').run(user.id);
+    return res.json({ success: true, message: `Email ${user.email} verified successfully.` });
 });
 
 app.get('/api/settings/public', (req, res) => {
@@ -383,6 +440,42 @@ app.post('/api/uploads/products', requireAuth, allowRoles('store_manager'), (req
     db.prepare('INSERT INTO product_images(id,mime_type,file_name,image_data,created_at) VALUES(?,?,?,?,?)').run(id, mimeType, safeName, bytes, new Date().toISOString());
     const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
     return res.status(201).json({ url: `${apiBase}/product-images/${id}`, imageId: id, storage: 'sqlite' });
+});
+
+
+// General-purpose media is persisted in the database; Render's ephemeral filesystem is not used.
+app.get('/api/media/:id', (req, res) => {
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ error: 'Image not found.' });
+    const media = db.prepare('SELECT mime_type,image_data FROM uploaded_media WHERE id = ?').get(req.params.id);
+    if (!media) return res.status(404).json({ error: 'Image not found.' });
+    res.set('Content-Type', media.mime_type);
+    res.set('Cache-Control', 'public, max-age=86400, immutable');
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.send(media.image_data);
+});
+
+app.post('/api/uploads/:kind', requireAuth, (req, res) => {
+    const kind = req.params.kind === 'products' ? 'product' : req.params.kind;
+    const rolesByKind = {
+        product: ['store_manager'],
+        store: ['superadmin', 'store_manager'],
+        profile: ['superadmin', 'store_manager', 'customer', 'rider']
+    };
+    if (!rolesByKind[kind]) return res.status(404).json({ error: 'Unknown image upload type.' });
+    if (!rolesByKind[kind].includes(req.user.role)) return res.status(403).json({ error: 'You do not have permission to upload this type of image.' });
+    const { filename, mimeType, data } = req.body || {};
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
+    if (typeof data !== 'string' || !supportedTypes.includes(mimeType)) return res.status(400).json({ error: 'Choose a JPG, PNG, WEBP, or AVIF image.' });
+    const base64 = data.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+    if (!base64 || base64.length > 7 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return res.status(400).json({ error: 'Image must be smaller than 5 MB and use valid image data.' });
+    const bytes = Buffer.from(base64, 'base64');
+    if (!bytes.length || bytes.length > 5 * 1024 * 1024) return res.status(400).json({ error: 'Image must be smaller than 5 MB.' });
+    const id = crypto.randomUUID();
+    const safeName = String(filename || `${kind}-image`).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100) || `${kind}-image`;
+    db.prepare('INSERT INTO uploaded_media(id,purpose,mime_type,file_name,image_data,uploaded_by,created_at) VALUES(?,?,?,?,?,?,?)')
+        .run(id, kind, mimeType, safeName, bytes, req.user.id, new Date().toISOString());
+    const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+    return res.status(201).json({ url: `${apiBase}/media/${id}`, imageId: id, storage: 'sqlite', purpose: kind });
 });
 
 app.delete('/api/products/:id', requireAuth, allowRoles('store_manager'), (req, res) => {
@@ -572,6 +665,58 @@ app.get('/api/orders/:id', requireAuth, (req, res) => {
     res.json({ order });
 });
 
+
+app.get('/api/orders/:id/location', requireAuth, (req, res) => {
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    if (!canViewOrder(req.user, order)) return res.status(403).json({ error: 'You do not have access to this order.' });
+    const location = db.prepare('SELECT order_id,rider_id,latitude,longitude,accuracy_m,recorded_at FROM rider_locations WHERE order_id = ?').get(order.id) || null;
+    return res.json({ location, active: order.status === 'Out for Delivery' });
+});
+
+app.post('/api/orders/:id/location', requireAuth, allowRoles('rider'), (req, res) => {
+    const order = db.prepare('SELECT id,rider_id,store_id,status FROM orders WHERE id = ?').get(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    if (Number(order.rider_id) !== Number(req.user.id) || Number(order.store_id) !== userStoreId(req.user)) return res.status(403).json({ error: 'You can only share GPS for a delivery assigned to you.' });
+    if (order.status !== 'Out for Delivery') return res.status(409).json({ error: 'Start the delivery before sharing your live location.' });
+    const latitude = Number(req.body.latitude), longitude = Number(req.body.longitude);
+    const accuracy = req.body.accuracyM == null ? null : Number(req.body.accuracyM);
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return res.status(400).json({ error: 'The device did not send valid GPS coordinates.' });
+    const recordedAt = new Date().toISOString();
+    db.prepare(`INSERT INTO rider_locations(order_id,rider_id,latitude,longitude,accuracy_m,recorded_at) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(order_id) DO UPDATE SET rider_id=excluded.rider_id,latitude=excluded.latitude,longitude=excluded.longitude,accuracy_m=excluded.accuracy_m,recorded_at=excluded.recorded_at`)
+        .run(order.id, req.user.id, latitude, longitude, Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null, recordedAt);
+    return res.json({ location: db.prepare('SELECT order_id,rider_id,latitude,longitude,accuracy_m,recorded_at FROM rider_locations WHERE order_id = ?').get(order.id) });
+});
+
+app.post('/api/orders/:id/delivery-proof', requireAuth, allowRoles('rider'), (req, res) => {
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+    if (Number(order.rider_id) !== Number(req.user.id) || Number(order.store_id) !== userStoreId(req.user)) return res.status(403).json({ error: 'Only the assigned rider can confirm this delivery.' });
+    if (order.status !== 'Out for Delivery') return res.status(409).json({ error: 'Only an order already out for delivery can be completed.' });
+    if (db.prepare('SELECT order_id FROM delivery_proofs WHERE order_id = ?').get(order.id)) return res.status(409).json({ error: 'This delivery already has a proof photo.' });
+    const { filename, mimeType, data } = req.body || {};
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
+    if (typeof data !== 'string' || !supportedTypes.includes(mimeType)) return res.status(400).json({ error: 'Take or choose a JPG, PNG, WEBP, or AVIF delivery photo.' });
+    const base64 = data.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+    if (!base64 || base64.length > 7 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return res.status(400).json({ error: 'Delivery proof photo must be smaller than 5 MB.' });
+    const bytes = Buffer.from(base64, 'base64');
+    if (!bytes.length || bytes.length > 5 * 1024 * 1024) return res.status(400).json({ error: 'Delivery proof photo must be smaller than 5 MB.' });
+    const mediaId = crypto.randomUUID(), now = new Date().toISOString();
+    const safeName = String(filename || 'delivery-proof.jpg').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+    const update = db.transaction(() => {
+        const latest = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
+        if (!latest || latest.status !== 'Out for Delivery' || Number(latest.rider_id) !== Number(req.user.id)) throw new Error('The order changed. Refresh before confirming delivery.');
+        db.prepare('INSERT INTO uploaded_media(id,purpose,mime_type,file_name,image_data,uploaded_by,created_at) VALUES(?,?,?,?,?,?,?)').run(mediaId, 'delivery-proof', mimeType, safeName, bytes, req.user.id, now);
+        db.prepare('INSERT INTO delivery_proofs(order_id,rider_id,media_id,delivered_at) VALUES(?,?,?,?)').run(order.id, req.user.id, mediaId, now);
+        db.prepare("UPDATE orders SET status='Delivered',eta_minutes=0,eta_at=NULL,updated_at=? WHERE id=?").run(now, order.id);
+        logTracking(order.id, req.user.id, 'Delivered', 'The rider confirmed delivery with a photo proof.', '', null);
+    });
+    try { update(); } catch (error) { return res.status(409).json({ error: error.message || 'Could not confirm delivery.' }); }
+    const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+    return res.json({ success: true, deliveryProofUrl: `${apiBase}/media/${mediaId}`, order: getOrderDetails(order.id) });
+});
+
 app.patch('/api/orders/:id/progress', requireAuth, allowRoles('store_manager', 'rider'), (req, res) => {
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
 
@@ -597,8 +742,16 @@ app.patch('/api/orders/:id/progress', requireAuth, allowRoles('store_manager', '
         return res.status(400).json({ error: 'Choose a valid order status.' });
     }
 
+    if (req.user.role === 'store_manager' && status === 'Out for Delivery' && order.status !== 'Out for Delivery') {
+        return res.status(403).json({ error: 'Only the assigned rider can confirm pickup and start live GPS tracking.' });
+    }
+
+    if (status === 'Delivered') {
+        return res.status(403).json({ error: 'Only the assigned rider can mark a delivery complete, and a photo proof is required.' });
+    }
+
     if (req.user.role === 'rider') {
-        const riderNext = order.status === 'Ready for Pickup' ? ['Out for Delivery'] : order.status === 'Out for Delivery' ? ['Delivered'] : [];
+        const riderNext = order.status === 'Ready for Pickup' ? ['Out for Delivery'] : order.status === 'Out for Delivery' ? ['Out for Delivery'] : [];
         if (!riderNext.includes(status)) {
             return res.status(403).json({ error: 'Riders can move an assigned job from Ready for Pickup to Out for Delivery, then Delivered.' });
         }

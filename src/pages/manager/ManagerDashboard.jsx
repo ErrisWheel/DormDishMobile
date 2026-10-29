@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bike, Check, Clock3, Edit3, Package, Plus, RefreshCw, Star, Trash2, TrendingUp, X } from 'lucide-react';
 import { apiRequest, formatDate, money } from '../../lib/api.js';
+import { ImageUploadField } from '../../components/ImageUploadField.jsx';
 
 const allowedNext = {
     Pending: ['Confirmed', 'Cancelled'],
     Confirmed: ['Preparing', 'Cancelled'],
     Preparing: ['Ready for Pickup', 'Cancelled'],
-    'Ready for Pickup': ['Out for Delivery', 'Cancelled'],
-    'Out for Delivery': ['Delivered', 'Cancelled'],
+    // The rider—not the store—confirms pickup and starts GPS tracking.
+    'Ready for Pickup': ['Cancelled'],
+    // Managers may add ETA/notes to an active trip, but cannot complete it.
+    'Out for Delivery': ['Cancelled'],
     Delivered: [],
     Cancelled: []
 };
@@ -93,7 +96,7 @@ function ManagerOrderCard({ order, riders, onUpdate, onAssignRider }) {
             </div>
             <div className="tracking-editor">
                 <div className="tracking-editor-heading">
-                    <strong>Simulated delivery tracking</strong>
+                    <strong>Delivery status & customer updates</strong>
                     <span>Latest: {order.tracking?.[0] ? formatDate(order.tracking[0].created_at) : 'No update yet'}</span>
                 </div>
                 <div className="form-grid">
@@ -154,7 +157,6 @@ export function ManagerDashboard({ user, page, onToast }) {
     const [editingId, setEditingId] = useState(null);
     const [loading, setLoading] = useState(true);
     const [savingProduct, setSavingProduct] = useState(false);
-    const [uploadingImage, setUploadingImage] = useState(false);
     const [error, setError] = useState('');
 
     async function refresh(silent = false) {
@@ -209,40 +211,6 @@ export function ManagerDashboard({ user, page, onToast }) {
             isAvailable: Boolean(product.is_available)
         });
         window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    async function uploadProductImage(event) {
-        const file = event.target.files?.[0];
-        event.target.value = '';
-        if (!file) return;
-        if (!['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(file.type)) {
-            setError('Choose a JPG, PNG, WEBP, or AVIF image.');
-            return;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-            setError('Choose an image smaller than 5 MB.');
-            return;
-        }
-        setUploadingImage(true);
-        setError('');
-        try {
-            const data = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result || ''));
-                reader.onerror = () => reject(new Error('Could not read this image file.'));
-                reader.readAsDataURL(file);
-            });
-            const result = await apiRequest('/uploads/products', {
-                method: 'POST',
-                body: { filename: file.name, mimeType: file.type, data }
-            });
-            updateForm('imageUrl', result.url);
-            onToast('Image uploaded. Save the product to apply it.');
-        } catch (requestError) {
-            setError(requestError.message);
-        } finally {
-            setUploadingImage(false);
-        }
     }
 
     async function saveProduct(event) {
@@ -396,9 +364,7 @@ export function ManagerDashboard({ user, page, onToast }) {
                             <label>Regular price (₱)<input type="number" min="0" step="0.01" value={productForm.price} onChange={(event) => updateForm('price', event.target.value)} required /></label>
                             <label>Old price (₱)<input type="number" min="0" step="0.01" value={productForm.oldPrice} onChange={(event) => updateForm('oldPrice', event.target.value)} /></label>
                             <label>Stock quantity<input type="number" min="0" step="1" value={productForm.stock} onChange={(event) => updateForm('stock', event.target.value)} required /></label>
-                            <label>Image URL or path<input value={productForm.imageUrl} onChange={(event) => updateForm('imageUrl', event.target.value)} placeholder="/images/hero-food.png or https://…" /></label>
-                            <label>Upload product photo<input type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={uploadProductImage} disabled={uploadingImage} /><small>{uploadingImage ? 'Uploading image…' : 'JPG, PNG, WEBP, AVIF · max 5 MB'}</small></label>
-                            <div className="product-image-preview form-span-two"><img src={productForm.imageUrl || '/images/hero-food.png'} alt="Product preview" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/images/hero-food.png'; }} /><span>{productForm.imageUrl ? 'Image preview' : 'Default product image'}</span></div>
+                            <div className="form-span-two"><ImageUploadField kind="product" label="Product photo" value={productForm.imageUrl} onChange={(imageUrl) => updateForm('imageUrl', imageUrl)} /></div>
                             <label className="form-span-two">Description<textarea value={productForm.description} onChange={(event) => updateForm('description', event.target.value)} rows="2" /></label>
                             <label className="checkbox-field"><input type="checkbox" checked={productForm.isAvailable} onChange={(event) => updateForm('isAvailable', event.target.checked)} /> Available for ordering</label>
                             <label className="checkbox-field"><input type="checkbox" checked={productForm.isPromoted} onChange={(event) => updateForm('isPromoted', event.target.checked)} /> Promote this item</label>
@@ -417,14 +383,14 @@ export function ManagerDashboard({ user, page, onToast }) {
 
             {page === 'manager-products' && (
                 <section className="dashboard-panel">
-                    <div className="panel-heading"><div><h2>Your products</h2><p>{products.length} product records</p></div></div>
+                    <div className="panel-heading"><div><h2>Your products</h2><p>{products.length} product records from SQLite</p></div></div>
                     {loading ? <p className="muted-copy">Loading products…</p> : products.length ? (
                         <div className="admin-table-wrap">
                             <table className="admin-table">
                                 <thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Availability</th><th>Actions</th></tr></thead>
                                 <tbody>{products.map((product) => (
                                     <tr key={product.id}>
-                                        <td><div className="table-product"><img src={product.image_url || '/images/hero-food.png'} alt={product.name} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/images/hero-food.png'; }} /><div><strong>{product.name}</strong><small>{product.category}</small></div></div></td>
+                                        <td><div className="table-product"><img src={product.image_url} alt="" /><div><strong>{product.name}</strong><small>{product.category}</small></div></div></td>
                                         <td>
                                             {product.promo_active ? <><strong>{money(product.price)}</strong> <del>{money(product.regular_price)}</del><small className="stock-good">{product.promo_label || 'Promotional price'}</small></> : money(product.price)}
                                             {product.is_promoted && !product.promo_active && <small className="muted-copy">Promotion scheduled/ended</small>}
@@ -451,7 +417,7 @@ export function ManagerDashboard({ user, page, onToast }) {
 
             {page === 'manager-ratings' && (
                 <section className="dashboard-panel">
-                    <div className="panel-heading"><div><h2>Customer ratings</h2><p>Rating averages are calculated from visible rating records.</p></div><span className="store-rating"><Star size={15} fill="currentColor" /> {ratingSummary.rating ? Number(ratingSummary.rating).toFixed(1) : 'New'}</span></div>
+                    <div className="panel-heading"><div><h2>Customer ratings</h2><p>Rating averages are calculated from visible SQLite rating records.</p></div><span className="store-rating"><Star size={15} fill="currentColor" /> {ratingSummary.rating ? Number(ratingSummary.rating).toFixed(1) : 'New'}</span></div>
                     {ratings.length ? (
                         <div className="rating-list">{ratings.map((rating) => <article className="rating-row" key={rating.id}><div className="rating-row-score"><Star size={16} fill="currentColor" /> {rating.score}/5</div><div><strong>{rating.reviewer_name}</strong><p>{rating.review || 'No written review.'}</p><small>{formatDate(rating.created_at)}</small></div></article>)}</div>
                     ) : <div className="dashboard-empty"><Star size={26} /><h3>No ratings yet</h3><p>Customer reviews will appear after delivered orders.</p></div>}

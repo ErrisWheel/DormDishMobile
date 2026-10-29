@@ -36,6 +36,11 @@ export function initializeDatabase() {
             store_id INTEGER REFERENCES stores(id) ON DELETE SET NULL,
             is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
             is_online INTEGER NOT NULL DEFAULT 0 CHECK (is_online IN (0, 1)),
+            profile_image_url TEXT NOT NULL DEFAULT '',
+            email_verified INTEGER NOT NULL DEFAULT 0 CHECK (email_verified IN (0, 1)),
+            email_verification_token_hash TEXT,
+            email_verification_expires_at TEXT,
+            email_verification_sent_at TEXT,
             created_at TEXT NOT NULL
         );
 
@@ -207,7 +212,41 @@ export function initializeDatabase() {
         is_promoted: 'INTEGER NOT NULL DEFAULT 0'
     });
 
-    addColumnsIfMissing('users', { is_online: 'INTEGER NOT NULL DEFAULT 0' });
+    addColumnsIfMissing('users', {
+        is_online: 'INTEGER NOT NULL DEFAULT 0',
+        profile_image_url: "TEXT NOT NULL DEFAULT ''",
+        email_verified: 'INTEGER NOT NULL DEFAULT 0',
+        email_verification_token_hash: 'TEXT',
+        email_verification_expires_at: 'TEXT',
+        email_verification_sent_at: 'TEXT'
+    });
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS uploaded_media (
+            id TEXT PRIMARY KEY,
+            purpose TEXT NOT NULL CHECK (purpose IN ('product','store','profile','delivery-proof')),
+            mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg','image/png','image/webp','image/avif')),
+            file_name TEXT NOT NULL DEFAULT 'image',
+            image_data BLOB NOT NULL,
+            uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS rider_locations (
+            order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+            rider_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+            longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+            accuracy_m REAL,
+            recorded_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rider_locations_rider ON rider_locations(rider_id, recorded_at);
+        CREATE TABLE IF NOT EXISTS delivery_proofs (
+            order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+            rider_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            media_id TEXT NOT NULL REFERENCES uploaded_media(id),
+            delivered_at TEXT NOT NULL
+        );
+    `);
 
     addColumnsIfMissing('orders', {
         order_notes: "TEXT NOT NULL DEFAULT ''",
@@ -234,6 +273,7 @@ export function initializeDatabase() {
     }
 
     seedDatabase();
+    if (process.env.SEED_DEMO_ACCOUNTS === 'true') seedDemoAccounts();
 
     const now = new Date().toISOString();
     const defaults = [
@@ -553,6 +593,36 @@ export function getPricingPolicy() {
     };
 }
 
+
+function seedDemoAccounts() {
+    const stores = db.prepare('SELECT id FROM stores WHERE is_active = 1 ORDER BY id LIMIT 3').all();
+    const passwords = {
+        admin: process.env.DEMO_SUPERADMIN_PASSWORD || 'Admin123!',
+        manager: process.env.DEMO_MANAGER_PASSWORD || 'Manager123!',
+        customer: process.env.DEMO_CUSTOMER_PASSWORD || 'Customer123!',
+        rider: process.env.DEMO_RIDER_PASSWORD || 'Rider123!'
+    };
+    const accounts = [{ name: 'System Super Admin', email: process.env.DEMO_SUPERADMIN_EMAIL || 'superadmin@dormdish.test', password: passwords.admin, role: 'superadmin', store_id: null }];
+    for (let index = 0; index < stores.length; index += 1) {
+        const suffix = ['alpha', 'beta', 'gamma'][index];
+        accounts.push({ name: `${suffix[0].toUpperCase()}${suffix.slice(1)} Store Manager`, email: process.env[`DEMO_MANAGER_${suffix.toUpperCase()}_EMAIL`] || `manager.${suffix}@dormdish.test`, password: passwords.manager, role: 'store_manager', store_id: stores[index].id });
+    }
+    accounts.push({ name: 'Campus Customer', email: process.env.DEMO_CUSTOMER_EMAIL || 'customer@dormdish.test', password: passwords.customer, role: 'customer', store_id: null });
+    if (stores[0]) accounts.push({ name: 'Store Alpha Rider', email: process.env.DEMO_RIDER_EMAIL || 'rider@dormdish.test', password: passwords.rider, role: 'rider', store_id: stores[0].id });
+    const now = new Date().toISOString();
+    const upsert = db.prepare(`INSERT INTO users(name,email,password_hash,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at)
+        VALUES(@name,@email,@password_hash,@role,@store_id,1,0,'',1,@created_at)
+        ON CONFLICT(email) DO UPDATE SET name=excluded.name,password_hash=excluded.password_hash,role=excluded.role,store_id=excluded.store_id,is_active=1,email_verified=1`);
+    const insertAll = db.transaction(() => {
+        for (const account of accounts) {
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email) || account.password.length < 8) throw new Error(`Invalid demo account configuration for ${account.email}.`);
+            upsert.run({ ...account, email: account.email.trim().toLowerCase(), password_hash: bcrypt.hashSync(account.password, 10), created_at: now });
+        }
+    });
+    insertAll();
+    console.log(`Demo account seeding complete; processed ${accounts.length} known demo accounts.`);
+}
+
 export function calculateOrderDiscounts(lines, groupMemberCount = 1) {
     const policy = getPricingPolicy();
 
@@ -635,6 +705,10 @@ export function getOrderDetails(orderId) {
         FROM ratings
         WHERE order_id = ? AND customer_id = ? AND is_visible = 1
     `).get(orderId, order.customer_id) || null;
+    order.rider_location = db.prepare('SELECT order_id, rider_id, latitude, longitude, accuracy_m, recorded_at FROM rider_locations WHERE order_id = ?').get(orderId) || null;
+    const proof = db.prepare('SELECT media_id, delivered_at FROM delivery_proofs WHERE order_id = ?').get(orderId);
+    const apiBase = String(process.env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+    order.delivery_proof_url = proof ? `${apiBase || '/api'}/media/${proof.media_id}` : null;
 
     return order;
 }

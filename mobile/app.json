@@ -4,17 +4,26 @@
     "slug": "dormdish",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "scheme": "dormdish",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.dormdish.mobile"
+      "bundleIdentifier": "com.dormdish.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "DormDish shares the rider's live delivery location with the customer while a delivery is active.",
+        "NSCameraUsageDescription": "DormDish uses the camera to capture delivery proof and product, store, or profile photos.",
+        "NSPhotoLibraryUsageDescription": "DormDish lets you choose a product, store, profile, or delivery photo from your library.",
+        "NSPhotoLibraryAddUsageDescription": "DormDish may save photos you choose to your photo library."
+      }
     },
     "android": {
       "package": "com.dormdish.mobile",
-      "adaptiveIcon": {
-        "backgroundColor": "#F7F8F5"
-      }
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ]
     }
   }
 }

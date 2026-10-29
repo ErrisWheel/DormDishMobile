@@ -12,11 +12,24 @@ const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'dormdish-api-t
 const databasePath = path.join(temporaryDirectory, 'test.sqlite');
 const port = 42000 + Math.floor(Math.random() * 10000);
 const baseUrl = `http://127.0.0.1:${port}/api`;
+// These integration tests must always use an isolated temporary SQLite database.
+// Do not let a developer's local Neon DATABASE_URL redirect the test server to production.
+const testPasswords = {
+    admin: process.env.DEMO_SUPERADMIN_PASSWORD || 'Admin123!',
+    manager: process.env.DEMO_MANAGER_PASSWORD || 'Manager123!',
+    customer: process.env.DEMO_CUSTOMER_PASSWORD || 'Customer123!',
+    rider: process.env.DEMO_RIDER_PASSWORD || 'Rider123!'
+};
 const childEnvironment = {
     ...process.env,
     PORT: String(port),
     JWT_SECRET: 'automated-test-secret-value-with-over-24-characters',
-    DORMDISH_DB_PATH: databasePath
+    DORMDISH_DB_PATH: databasePath,
+    DATABASE_URL: '',
+    DEMO_SUPERADMIN_PASSWORD: testPasswords.admin,
+    DEMO_MANAGER_PASSWORD: testPasswords.manager,
+    DEMO_CUSTOMER_PASSWORD: testPasswords.customer,
+    DEMO_RIDER_PASSWORD: testPasswords.rider
 };
 let apiProcess;
 let customerToken;
@@ -75,11 +88,11 @@ before(async () => {
     }
 
     assert.equal(ready, true, 'API should become ready');
-    customerToken = await login('customer@dormdish.test', process.env.DEMO_CUSTOMER_PASSWORD);
-    alphaManagerToken = await login('manager.alpha@dormdish.test', process.env.DEMO_MANAGER_PASSWORD);
-    betaManagerToken = await login('manager.beta@dormdish.test', process.env.DEMO_MANAGER_PASSWORD);
-    superadminToken = await login('superadmin@dormdish.test', process.env.DEMO_SUPERADMIN_PASSWORD);
-    riderToken = await login('rider@dormdish.test', process.env.DEMO_RIDER_PASSWORD);
+    customerToken = await login('customer@dormdish.test', testPasswords.customer);
+    alphaManagerToken = await login('manager.alpha@dormdish.test', testPasswords.manager);
+    betaManagerToken = await login('manager.beta@dormdish.test', testPasswords.manager);
+    superadminToken = await login('superadmin@dormdish.test', testPasswords.admin);
+    riderToken = await login('rider@dormdish.test', testPasswords.rider);
     const betaProducts = await request('/products?storeId=2');
     const alphaProducts = await request('/products?storeId=1');
     betaProductId = betaProducts.body.products[0].id;
@@ -162,6 +175,15 @@ test('customer can view only their own orders and rider cannot view manager tool
     assert.equal(managerTools.status, 403);
 });
 
+
+test('media uploads require an authenticated user and allowed image payload', async () => {
+    const noAuth = await request('/uploads/profile', { method: 'POST', body: { filename: 'x.jpg', mimeType: 'image/jpeg', data: 'data:image/jpeg;base64,/9j/2Q==' } });
+    assert.equal(noAuth.status, 401);
+    const uploaded = await request('/uploads/profile', { method: 'POST', body: { filename: 'profile.jpg', mimeType: 'image/jpeg', data: 'data:image/jpeg;base64,/9j/2Q==' } }, customerToken);
+    assert.equal(uploaded.status, 201);
+    assert.match(uploaded.body.url, /\/media\/[0-9a-f-]{36}$/i);
+});
+
 test('API rejects unauthenticated protected access', async () => {
     const result = await request('/admin/users');
     assert.equal(result.status, 401);
@@ -193,13 +215,32 @@ test('customer order lifecycle persists ETA, tracking, and store rating', async 
         assert.equal(updated.body.order.status, status);
     }
 
-    const outForDelivery = await request(`/orders/${encodeURIComponent(orderId)}/progress`, {
+    const managerPickupAttempt = await request(`/orders/${encodeURIComponent(orderId)}/progress`, {
         method: 'PATCH',
         body: { status: 'Out for Delivery', etaMinutes: 12, note: 'Rider has picked up your order.', locationLabel: 'Leaving Store Alpha' }
     }, alphaManagerToken);
+    assert.equal(managerPickupAttempt.status, 403, 'a store manager cannot confirm physical rider pickup');
+
+    const online = await request('/rider/availability', { method: 'PATCH', body: { isOnline: true } }, riderToken);
+    assert.equal(online.status, 200);
+    const accepted = await request(`/orders/${encodeURIComponent(orderId)}/accept-rider`, { method: 'POST', body: {} }, riderToken);
+    assert.equal(accepted.status, 200);
+    const outForDelivery = await request(`/orders/${encodeURIComponent(orderId)}/progress`, {
+        method: 'PATCH',
+        body: { status: 'Out for Delivery', etaMinutes: 12, note: 'Rider picked up the order.' }
+    }, riderToken);
     assert.equal(outForDelivery.status, 200);
     assert.ok(outForDelivery.body.order.eta_at);
     assert.equal(outForDelivery.body.order.eta_minutes, 12);
+
+    const gps = await request(`/orders/${encodeURIComponent(orderId)}/location`, {
+        method: 'POST', body: { latitude: 14.6195, longitude: 121.0008, accuracyM: 8 }
+    }, riderToken);
+    assert.equal(gps.status, 200);
+    assert.equal(Number(gps.body.location.latitude), 14.6195);
+    const customerGps = await request(`/orders/${encodeURIComponent(orderId)}/location`, {}, customerToken);
+    assert.equal(customerGps.status, 200);
+    assert.equal(Number(customerGps.body.location.longitude), 121.0008);
 
     const riderUpdate = await request(`/orders/${encodeURIComponent(orderId)}/progress`, {
         method: 'PATCH',
@@ -208,12 +249,18 @@ test('customer order lifecycle persists ETA, tracking, and store rating', async 
     assert.equal(riderUpdate.status, 200);
     assert.ok(riderUpdate.body.order.tracking.some((update) => update.location_label === 'Campus Main Gate'));
 
-    const delivered = await request(`/orders/${encodeURIComponent(orderId)}/progress`, {
-        method: 'PATCH',
-        body: { status: 'Delivered', note: 'Handed to customer.', locationLabel: 'Delivery destination' }
+    const blockedDelivery = await request(`/orders/${encodeURIComponent(orderId)}/progress`, {
+        method: 'PATCH', body: { status: 'Delivered' }
+    }, riderToken);
+    assert.equal(blockedDelivery.status, 403, 'delivery requires an uploaded proof photo');
+
+    const delivered = await request(`/orders/${encodeURIComponent(orderId)}/delivery-proof`, {
+        method: 'POST',
+        body: { filename: 'proof.jpg', mimeType: 'image/jpeg', data: 'data:image/jpeg;base64,/9j/2Q==' }
     }, riderToken);
     assert.equal(delivered.status, 200);
     assert.equal(delivered.body.order.status, 'Delivered');
+    assert.ok(delivered.body.order.delivery_proof_url);
 
     const rating = await request(`/orders/${encodeURIComponent(orderId)}/ratings`, {
         method: 'POST',

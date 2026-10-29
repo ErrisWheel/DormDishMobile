@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS users (
   store_id BIGINT REFERENCES stores(id) ON DELETE SET NULL,
   is_active SMALLINT NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   is_online SMALLINT NOT NULL DEFAULT 0 CHECK (is_online IN (0,1)),
+  profile_image_url TEXT NOT NULL DEFAULT '',
+  email_verified SMALLINT NOT NULL DEFAULT 0 CHECK (email_verified IN (0,1)),
+  email_verification_token_hash TEXT,
+  email_verification_expires_at TEXT,
+  email_verification_sent_at TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS products (
@@ -144,3 +149,36 @@ CREATE TABLE IF NOT EXISTS rider_job_declines (
   PRIMARY KEY (rider_id, order_id)
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_online SMALLINT NOT NULL DEFAULT 0;
+
+
+-- Added in the rider GPS, image-upload, delivery-proof, and verification update.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TEXT;
+
+CREATE TABLE IF NOT EXISTS uploaded_media (
+  id UUID PRIMARY KEY,
+  purpose TEXT NOT NULL CHECK (purpose IN ('product','store','profile','delivery-proof')),
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg','image/png','image/webp','image/avif')),
+  file_name TEXT NOT NULL DEFAULT 'image',
+  image_data BYTEA NOT NULL,
+  uploaded_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rider_locations (
+  order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+  rider_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  latitude DOUBLE PRECISION NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+  longitude DOUBLE PRECISION NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+  accuracy_m DOUBLE PRECISION,
+  recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rider_locations_rider ON rider_locations(rider_id, recorded_at);
+CREATE TABLE IF NOT EXISTS delivery_proofs (
+  order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+  rider_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  media_id UUID NOT NULL REFERENCES uploaded_media(id),
+  delivered_at TEXT NOT NULL
+);

@@ -1,0 +1,30 @@
+DormDish backend login-route/deployment fix (2026-10-29)
+
+This patch is for the backend source, not the Expo client. It includes package.json plus the full server/ folder from the Neon/PostgreSQL version.
+
+Changes:
+- Registers POST /api/auth/login and POST /auth/login to the same login handler in PostgreSQL and SQLite modes.
+- Adds build marker `dormdish-login-route-fix-2026-10-29` to GET /api/health.
+- Returns JSON diagnostics for unmatched /api/* and /auth/* routes.
+- Does not modify credentials, reset accounts, or delete/recreate the Neon database.
+
+Apply:
+1. Extract this ZIP into E:\DormDishMobile (the repository root), preserving folder structure and overwriting included files.
+2. In PowerShell:
+
+   cd E:\DormDishMobile
+   git status --short
+   git add package.json server
+   git commit -m "Fix DormDish API login route deployment"
+   git push
+
+   If `git commit` says there is nothing to commit, check that the ZIP was extracted into the actual repo. If `git push` is rejected, inspect the error; do not force push just to fix this API issue.
+
+3. In Render, open the BACKEND Web Service named dormdish-api and deploy the commit you just pushed (Manual Deploy -> Deploy latest commit if auto deploy is off). The API service should use repository root as Root Directory, `npm install` as Build Command, and `npm run server` as Start Command. Keep the existing Render environment variables, including DATABASE_URL, JWT_SECRET, PUBLIC_API_URL, and CORS_ORIGIN. Do not change VITE_API_URL for this backend-only fix.
+
+Verify deployment before retrying login:
+Open https://dormdish-api.onrender.com/api/health. It must show `build: "dormdish-login-route-fix-2026-10-29"`, `database: "postgresql"`, and `loginRoutes` listing `POST /api/auth/login` and `POST /auth/login`.
+
+If the build marker is missing, this code has not reached the service you are opening: verify the Render service's connected repository, branch, Root Directory, and Start Command. Do not edit Neon user records or reset the admin password to resolve a route 404.
+
+After the marker appears, restart Expo from the mobile folder with `npx expo start --clear` and retest the existing admin account. If a route is live, wrong credentials would return HTTP 401 JSON; a route-level 404 should no longer occur.

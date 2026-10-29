@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
 import { Pool } from 'pg';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -46,13 +47,35 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json({ limit: '8mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 const run = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const query = (text, values = [], client = pool) => client.query(text, values);
 const one = async (text, values = [], client = pool) => (await query(text, values, client)).rows[0] || null;
 const many = async (text, values = [], client = pool) => (await query(text, values, client)).rows;
 const nowIso = () => new Date().toISOString();
+const smtpUser = process.env.SMTP_USER || '';
+const smtpPass = process.env.SMTP_PASS || '';
+const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: Number(process.env.SMTP_PORT || 465),
+  secure: String(process.env.SMTP_SECURE ?? 'true').toLowerCase() !== 'false',
+  auth: { user: smtpUser, pass: smtpPass }
+}) : null;
+const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
+function emailVerificationConfigured() { return Boolean(mailer && publicWebUrl); }
+async function sendVerificationMessage(user, rawToken) {
+  if (!emailVerificationConfigured()) throw new Error('Email verification is not configured. Set SMTP_USER, SMTP_PASS, and PUBLIC_WEB_URL on Render.');
+  const link = `${publicWebUrl}/?verify=${encodeURIComponent(rawToken)}`;
+  await mailer.sendMail({
+    from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+    to: user.email,
+    subject: 'Verify your DormDish account',
+    text: `Hi ${user.name},\n\nVerify your DormDish account using this link (expires in 24 hours):\n${link}\n\nIf you did not request this email, you can ignore it.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#17231c"><h1>Verify your DormDish account</h1><p>Hi ${String(user.name || 'there').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))},</p><p>Confirm your email address to keep your DormDish account information current.</p><p><a href="${link}" style="display:inline-block;background:#176b45;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Verify account</a></p><p>This link expires in 24 hours. If you did not request this email, ignore it.</p></div>`
+  });
+}
 const idToken = () => `DD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 const groupToken = () => `DG-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 
@@ -67,7 +90,8 @@ async function initializeSchema() {
     await query('INSERT INTO app_settings(setting_key, setting_value, updated_at) VALUES($1,$2,$3) ON CONFLICT(setting_key) DO NOTHING', [key, value, nowIso()]);
   }
   await seedInitialAdmin();
-  if (process.env.SEED_SAMPLE_DATA === 'true') await seedSampleData();
+  if (process.env.SEED_SAMPLE_DATA === 'true' || process.env.SEED_DEMO_ACCOUNTS === 'true') await seedSampleData();
+  if (process.env.SEED_DEMO_ACCOUNTS === 'true') await seedDemoAccounts();
 }
 
 async function seedInitialAdmin() {
@@ -143,6 +167,32 @@ async function seedSampleData() {
   }
 }
 
+
+// Explicit opt-in, idempotent demo seeding. When enabled, only known demo accounts are deliberately reset to the configured demo passwords.
+async function seedDemoAccounts() {
+  const stores = await many('SELECT id,name FROM stores WHERE is_active=1 ORDER BY id LIMIT 3');
+  const passwords = {
+    admin: process.env.DEMO_SUPERADMIN_PASSWORD || 'Admin123!',
+    manager: process.env.DEMO_MANAGER_PASSWORD || 'Manager123!',
+    customer: process.env.DEMO_CUSTOMER_PASSWORD || 'Customer123!',
+    rider: process.env.DEMO_RIDER_PASSWORD || 'Rider123!'
+  };
+  const accounts = [{ name: 'System Super Admin', email: process.env.DEMO_SUPERADMIN_EMAIL || 'superadmin@dormdish.test', password: passwords.admin, role: 'superadmin', store_id: null }];
+  for (let index = 0; index < Math.min(stores.length, 3); index += 1) {
+    const suffix = ['alpha', 'beta', 'gamma'][index];
+    accounts.push({ name: `${suffix[0].toUpperCase()}${suffix.slice(1)} Store Manager`, email: process.env[`DEMO_MANAGER_${suffix.toUpperCase()}_EMAIL`] || `manager.${suffix}@dormdish.test`, password: passwords.manager, role: 'store_manager', store_id: stores[index].id });
+  }
+  accounts.push({ name: 'Campus Customer', email: process.env.DEMO_CUSTOMER_EMAIL || 'customer@dormdish.test', password: passwords.customer, role: 'customer', store_id: null });
+  if (stores[0]) accounts.push({ name: 'Store Alpha Rider', email: process.env.DEMO_RIDER_EMAIL || 'rider@dormdish.test', password: passwords.rider, role: 'rider', store_id: stores[0].id });
+  const now = nowIso();
+  for (const account of accounts) {
+    if (!validEmail(account.email) || account.password.length < 8) throw new Error(`Invalid demo account configuration for ${account.email}.`);
+    await query(`INSERT INTO users(name,email,password_hash,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at)
+      VALUES($1,$2,$3,$4,$5,1,0,'',1,$6) ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name,password_hash=EXCLUDED.password_hash,role=EXCLUDED.role,store_id=EXCLUDED.store_id,is_active=1,email_verified=1`, [account.name, account.email.trim().toLowerCase(), await bcrypt.hash(account.password, 10), account.role, account.store_id, now]);
+  }
+  console.log(`Demo account seeding complete; processed ${accounts.length} known demo accounts.`);
+}
+
 function cleanUser(user) {
   if (!user) return user;
   const { password_hash, ...safe } = user;
@@ -158,7 +208,7 @@ function auth(req, res, next) {
   let payload;
   try { payload = jwt.verify(token, jwtSecret); } catch { return res.status(401).json({ error: 'Your session expired. Sign in again.' }); }
   return run(async (request, response, nextMiddleware) => {
-    const user = await one('SELECT id,name,email,role,store_id,is_active,is_online,created_at FROM users WHERE id=$1', [payload.sub]);
+    const user = await one('SELECT id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at FROM users WHERE id=$1', [payload.sub]);
     if (!user || !Number(user.is_active)) return response.status(401).json({ error: 'This account is unavailable.' });
     request.user = user;
     nextMiddleware();
@@ -202,12 +252,15 @@ async function getOrderDetails(id, client = pool) {
   const order = await one(`SELECT o.*, c.name AS customer_name, s.name AS store_name, s.location_name, s.maps_url, r.name AS rider_name
     FROM orders o JOIN users c ON c.id=o.customer_id JOIN stores s ON s.id=o.store_id LEFT JOIN users r ON r.id=o.rider_id WHERE o.id=$1`, [id], client);
   if (!order) return null;
-  const [items, tracking, rating] = await Promise.all([
+  const [items, tracking, rating, riderLocation, deliveryProof] = await Promise.all([
     many('SELECT oi.*, u.name AS ordered_by_name FROM order_items oi LEFT JOIN users u ON u.id=oi.ordered_by_customer_id WHERE oi.order_id=$1 ORDER BY oi.id', [id], client),
     many('SELECT t.*, u.name AS updated_by_name FROM tracking_updates t LEFT JOIN users u ON u.id=t.updated_by WHERE t.order_id=$1 ORDER BY t.created_at DESC,t.id DESC', [id], client),
-    one('SELECT id,score,review,created_at FROM ratings WHERE order_id=$1 AND customer_id=$2 AND is_visible=1', [id, order.customer_id], client)
+    one('SELECT id,score,review,created_at FROM ratings WHERE order_id=$1 AND customer_id=$2 AND is_visible=1', [id, order.customer_id], client),
+    one('SELECT order_id,rider_id,latitude,longitude,accuracy_m,recorded_at FROM rider_locations WHERE order_id=$1', [id], client),
+    one('SELECT media_id,delivered_at FROM delivery_proofs WHERE order_id=$1', [id], client)
   ]);
-  return { ...order, items, tracking, rating: rating || null };
+  const apiBase = String(process.env.PUBLIC_API_URL || '').replace(/\/+$/, '');
+  return { ...order, items, tracking, rating: rating || null, rider_location: riderLocation || null, delivery_proof_url: deliveryProof ? `${apiBase || '/api'}/media/${deliveryProof.media_id}` : null };
 }
 async function logTracking(orderId, updatedBy, status, note, locationLabel = '', etaAt = null, client = pool) {
   await query('INSERT INTO tracking_updates(order_id,updated_by,status,note,location_label,eta_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)', [orderId, updatedBy, status, note || '', locationLabel || '', etaAt || null, nowIso()], client);
@@ -248,7 +301,7 @@ async function requireManagerOrder(req,res,order) {
 }
 
 // Health and authentication.
-const API_BUILD = 'dormdish-login-route-fix-2026-10-29';
+const API_BUILD = 'dormdish-live-gps-proof-verification-2026-10-29';
 app.get('/api/health', run(async (_req,res) => {
   await query('SELECT 1');
   res.json({
@@ -257,6 +310,7 @@ app.get('/api/health', run(async (_req,res) => {
     service: 'dormdish-api',
     build: API_BUILD,
     loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
+    features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof'],
     timestamp: nowIso()
   });
 }));
@@ -273,11 +327,44 @@ const loginHandler = run(async (req,res) => {
 app.post('/api/auth/login', loginHandler);
 app.post('/auth/login', loginHandler);
 app.get('/api/auth/me', auth, run(async (req,res) => res.json({ user: req.user })));
-app.patch('/api/auth/profile', auth, role('customer'), run(async (req,res) => {
-  const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+app.patch('/api/auth/profile', auth, run(async (req,res) => {
+  const name = typeof req.body.name === 'string' ? req.body.name.trim() : req.user.name;
+  const profileImageUrl = Object.hasOwn(req.body, 'profileImageUrl') ? String(req.body.profileImageUrl || '').trim() : req.user.profile_image_url || '';
   if (name.length < 2 || name.length > 100) return res.status(400).json({ error: 'Name must contain between 2 and 100 characters.' });
-  const user = await one('UPDATE users SET name=$1 WHERE id=$2 RETURNING id,name,email,role,store_id,is_active,is_online,created_at', [name,req.user.id]);
+  if (profileImageUrl.length > 500 || (profileImageUrl && !/^https:\/\//i.test(profileImageUrl) && !profileImageUrl.startsWith('/'))) return res.status(400).json({ error: 'Choose a valid profile photo.' });
+  const user = await one('UPDATE users SET name=$1,profile_image_url=$2 WHERE id=$3 RETURNING id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at', [name,profileImageUrl,req.user.id]);
   res.json({ user });
+}));
+
+app.post('/api/auth/verification/send', auth, run(async (req,res) => {
+  const user = await one('SELECT id,name,email,email_verified,email_verification_sent_at FROM users WHERE id=$1', [req.user.id]);
+  if (!user) return res.status(404).json({ error: 'Account not found.' });
+  if (Number(user.email_verified)) return res.json({ success: true, alreadyVerified: true, message: 'Your email is already verified.' });
+  if (!emailVerificationConfigured()) return res.status(503).json({ error: 'Email verification is not configured. Set SMTP_USER, SMTP_PASS, and PUBLIC_WEB_URL in Render.' });
+  if (user.email_verification_sent_at && Date.now() - Date.parse(user.email_verification_sent_at) < 60000) return res.status(429).json({ error: 'Wait one minute before requesting another verification email.' });
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  await query('UPDATE users SET email_verification_token_hash=$1,email_verification_expires_at=$2,email_verification_sent_at=$3 WHERE id=$4', [sha256(rawToken),expiresAt,nowIso(),user.id]);
+  try { await sendVerificationMessage(user, rawToken); }
+  catch (error) {
+    await query('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL WHERE id=$1', [user.id]);
+    console.error('Could not send verification email:', error.message);
+    return res.status(502).json({ error: 'Could not send the verification email. Check SMTP settings and Render logs.' });
+  }
+  res.json({ success: true, message: `Verification email sent to ${user.email}.` });
+}));
+
+app.get('/api/auth/verify', run(async (req,res) => {
+  const token = typeof req.query.token === 'string' ? req.query.token : '';
+  if (!/^[a-f0-9]{64}$/i.test(token)) return res.status(400).json({ error: 'That verification link is invalid or incomplete.' });
+  const user = await one('SELECT id,email,email_verification_expires_at FROM users WHERE email_verification_token_hash=$1', [sha256(token)]);
+  if (!user) return res.status(400).json({ error: 'That verification link has already been used or is invalid. Request a new one from your profile.' });
+  if (!user.email_verification_expires_at || Date.parse(user.email_verification_expires_at) <= Date.now()) {
+    await query('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL WHERE id=$1', [user.id]);
+    return res.status(400).json({ error: 'This verification link expired. Sign in and request a new one.' });
+  }
+  await query('UPDATE users SET email_verified=1,email_verification_token_hash=NULL,email_verification_expires_at=NULL WHERE id=$1', [user.id]);
+  res.json({ success: true, message: `Email verified for ${user.email}. You can return to DormDish.` });
 }));
 app.get('/api/settings/public', run(async (_req,res) => {
   const rows = await many("SELECT setting_key,setting_value FROM app_settings WHERE setting_key=ANY($1::text[])", [['delivery_fee','default_eta_minutes','campus_location','student_discount_percent','group_discount_percent','group_discount_min_members','group_discount_min_subtotal']]);
@@ -354,6 +441,40 @@ app.post('/api/uploads/products', auth, role('store_manager'), run(async (req,re
   res.status(201).json({ url: `${apiBase}/product-images/${id}`, imageId: id, storage: 'postgresql' });
 }));
 
+
+// General-purpose image storage in Neon; actual image bytes live in BYTEA, not the Render filesystem.
+app.get('/api/media/:id', run(async (req,res) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).json({ error: 'Image not found.' });
+  const image = await one('SELECT mime_type,image_data FROM uploaded_media WHERE id=$1', [req.params.id]);
+  if (!image) return res.status(404).json({ error: 'Image not found.' });
+  res.set('Content-Type', image.mime_type);
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.send(image.image_data);
+}));
+app.post('/api/uploads/:kind', auth, run(async (req,res) => {
+  const kind = req.params.kind;
+  const rolesByKind = {
+    product: ['store_manager'],
+    store: ['superadmin','store_manager'],
+    profile: ['superadmin','store_manager','customer','rider']
+  };
+  if (!rolesByKind[kind]) return res.status(404).json({ error: 'Unknown image upload type.' });
+  if (!rolesByKind[kind].includes(req.user.role)) return res.status(403).json({ error: 'You do not have permission to upload this type of image.' });
+  const { filename, mimeType, data } = req.body || {};
+  const supportedTypes = ['image/jpeg','image/png','image/webp','image/avif'];
+  if (typeof data !== 'string' || typeof mimeType !== 'string' || !supportedTypes.includes(mimeType)) return res.status(400).json({ error: 'Choose a JPG, PNG, WEBP, or AVIF image.' });
+  const base64 = data.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+  if (!base64 || base64.length > 7 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return res.status(400).json({ error: 'Image must be smaller than 5 MB and use valid image data.' });
+  const bytes = Buffer.from(base64, 'base64');
+  if (!bytes.length || bytes.length > 5 * 1024 * 1024) return res.status(400).json({ error: 'Image must be smaller than 5 MB.' });
+  const id = crypto.randomUUID();
+  const safeName = String(filename || `${kind}-image`).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0,100) || `${kind}-image`;
+  await query('INSERT INTO uploaded_media(id,purpose,mime_type,file_name,image_data,uploaded_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)', [id,kind,mimeType,safeName,bytes,req.user.id,nowIso()]);
+  const apiBase = String(process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/+$/, '');
+  res.status(201).json({ url: `${apiBase}/media/${id}`, imageId: id, storage: 'postgresql', purpose: kind });
+}));
+
 // Customer orders, manager orders, and rider jobs.
 app.get('/api/orders', auth, run(async (req,res) => {
   if (req.user.role === 'superadmin') return res.status(403).json({ error: 'Super Admin does not have order-management access.' });
@@ -404,15 +525,65 @@ app.get('/api/orders/:id', auth, run(async (req,res) => {
   if(req.user.role==='customer'){order.rating=await one('SELECT id,score,review,created_at FROM ratings WHERE order_id=$1 AND customer_id=$2 AND is_visible=1',[order.id,req.user.id]);order.can_rate=Number(order.customer_id)===Number(req.user.id);}
   res.json({order});
 }));
+app.get('/api/orders/:id/location', auth, run(async(req,res)=>{
+  const order=await getOrderDetails(req.params.id);
+  if(!order)return res.status(404).json({error:'Order not found.'});
+  if(!await canViewOrder(req.user,order))return res.status(403).json({error:'You do not have access to this order.'});
+  const location=await one('SELECT order_id,rider_id,latitude,longitude,accuracy_m,recorded_at FROM rider_locations WHERE order_id=$1',[order.id]);
+  res.json({location:location||null,active:order.status==='Out for Delivery'});
+}));
+app.post('/api/orders/:id/location', auth, role('rider'), run(async(req,res)=>{
+  const order=await one('SELECT id,rider_id,store_id,status FROM orders WHERE id=$1',[req.params.id]);
+  if(!order)return res.status(404).json({error:'Order not found.'});
+  if(Number(order.rider_id)!==Number(req.user.id)||Number(order.store_id)!==userStoreId(req.user))return res.status(403).json({error:'You can only share GPS for a delivery assigned to you.'});
+  if(order.status!=='Out for Delivery')return res.status(409).json({error:'Start the delivery before sharing your live location.'});
+  const latitude=Number(req.body.latitude),longitude=Number(req.body.longitude),accuracy=req.body.accuracyM==null?null:Number(req.body.accuracyM);
+  if(!Number.isFinite(latitude)||latitude < -90||latitude > 90||!Number.isFinite(longitude)||longitude < -180||longitude > 180)return res.status(400).json({error:'The device did not send valid GPS coordinates.'});
+  const recordedAt=nowIso();
+  const location=await one(`INSERT INTO rider_locations(order_id,rider_id,latitude,longitude,accuracy_m,recorded_at) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(order_id) DO UPDATE SET rider_id=EXCLUDED.rider_id,latitude=EXCLUDED.latitude,longitude=EXCLUDED.longitude,accuracy_m=EXCLUDED.accuracy_m,recorded_at=EXCLUDED.recorded_at
+    RETURNING order_id,rider_id,latitude,longitude,accuracy_m,recorded_at`,[order.id,req.user.id,latitude,longitude,Number.isFinite(accuracy)&&accuracy>=0?accuracy:null,recordedAt]);
+  res.json({location});
+}));
+app.post('/api/orders/:id/delivery-proof', auth, role('rider'), run(async(req,res)=>{
+  const order=await one('SELECT * FROM orders WHERE id=$1',[req.params.id]);
+  if(!order)return res.status(404).json({error:'Order not found.'});
+  if(Number(order.rider_id)!==Number(req.user.id)||Number(order.store_id)!==userStoreId(req.user))return res.status(403).json({error:'Only the assigned rider can confirm this delivery.'});
+  if(order.status!=='Out for Delivery')return res.status(409).json({error:'Only an order already out for delivery can be completed.'});
+  if(await one('SELECT order_id FROM delivery_proofs WHERE order_id=$1',[order.id]))return res.status(409).json({error:'This delivery already has a proof photo.'});
+  const {filename,mimeType,data}=req.body||{};
+  const supportedTypes=['image/jpeg','image/png','image/webp','image/avif'];
+  if(typeof data!=='string'||!supportedTypes.includes(mimeType))return res.status(400).json({error:'Take or choose a JPG, PNG, WEBP, or AVIF delivery photo.'});
+  const base64=data.replace(/^data:[^;]+;base64,/,'').replace(/\s/g,'');
+  if(!base64||base64.length>7*1024*1024||!/^[A-Za-z0-9+/]*={0,2}$/.test(base64))return res.status(400).json({error:'Delivery proof photo must be smaller than 5 MB.'});
+  const bytes=Buffer.from(base64,'base64');if(!bytes.length||bytes.length>5*1024*1024)return res.status(400).json({error:'Delivery proof photo must be smaller than 5 MB.'});
+  const mediaId=crypto.randomUUID(),now=nowIso(),safeName=String(filename||'delivery-proof').replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,100);
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const locked=await one('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[order.id],client);
+    if(!locked||locked.status!=='Out for Delivery'||Number(locked.rider_id)!==Number(req.user.id))throw new Error('The order changed. Refresh before confirming delivery.');
+    await query('INSERT INTO uploaded_media(id,purpose,mime_type,file_name,image_data,uploaded_by,created_at) VALUES($1,\'delivery-proof\',$2,$3,$4,$5,$6)',[mediaId,mimeType,safeName,bytes,req.user.id,now],client);
+    await query('INSERT INTO delivery_proofs(order_id,rider_id,media_id,delivered_at) VALUES($1,$2,$3,$4)',[order.id,req.user.id,mediaId,now],client);
+    await query("UPDATE orders SET status='Delivered',eta_minutes=0,eta_at=NULL,updated_at=$1 WHERE id=$2",[now,order.id],client);
+    await logTracking(order.id,req.user.id,'Delivered','The rider confirmed delivery with a photo proof.','',null,client);
+    await client.query('COMMIT');
+  }catch(error){await client.query('ROLLBACK');return res.status(409).json({error:error.message||'Could not confirm delivery.'});}finally{client.release();}
+  const apiBase=String(process.env.PUBLIC_API_URL||`${req.protocol}://${req.get('host')}/api`).replace(/\/+$/,'');
+  res.json({success:true,deliveryProofUrl:`${apiBase}/media/${mediaId}`,order:await getOrderDetails(order.id)});
+}));
+
 app.patch('/api/orders/:id/progress', auth, role('store_manager','rider'), run(async(req,res)=>{
   const order=await one('SELECT * FROM orders WHERE id=$1',[req.params.id]);if(!order)return res.status(404).json({error:'Order not found.'});
   if(req.user.role==='store_manager'&&!await requireManagerOrder(req,res,order))return;
   if(req.user.role==='rider'&&(Number(order.rider_id)!==Number(req.user.id)||Number(order.store_id)!==userStoreId(req.user)))return res.status(403).json({error:'You can only update deliveries assigned to you at your store.'});
   const {status,note,locationLabel}=req.body;const etaWasIncluded=Object.hasOwn(req.body,'etaMinutes');const etaMinutes=etaWasIncluded&&req.body.etaMinutes!==null&&req.body.etaMinutes!==''?Number(req.body.etaMinutes):null;
   if(!statuses.includes(status))return res.status(400).json({error:'Choose a valid order status.'});
+  if (status === 'Delivered') return res.status(403).json({error:'Only the assigned rider can mark a delivery complete, and a photo proof is required.'});
+  if (req.user.role === 'store_manager' && status === 'Out for Delivery' && order.status !== 'Out for Delivery') return res.status(403).json({error:'Only the assigned rider can confirm pickup and start live GPS tracking.'});
   if(req.user.role==='rider'){
-    const riderTransitions = order.status==='Ready for Pickup' ? ['Out for Delivery'] : order.status==='Out for Delivery' ? ['Delivered'] : [];
-    if(!riderTransitions.includes(status))return res.status(403).json({error:'Riders can move an assigned job from Ready for Pickup to Out for Delivery, then Delivered.'});
+    const riderTransitions = order.status==='Ready for Pickup' ? ['Out for Delivery'] : order.status==='Out for Delivery' ? ['Out for Delivery'] : [];
+    if(!riderTransitions.includes(status))return res.status(403).json({error:'Riders can start an assigned job from Ready for Pickup, then update it while Out for Delivery. Use the camera confirmation to complete delivery.'});
   } else if(!nextStatuses[order.status].includes(status)&&order.status!==status)return res.status(400).json({error:`Status cannot move from ${order.status} to ${status}.`});
   if(etaMinutes!==null&&(!Number.isInteger(etaMinutes)||etaMinutes<0||etaMinutes>240))return res.status(400).json({error:'ETA must be between 0 and 240 minutes.'});
   if(status!==order.status&&order.status==='Cancelled')return res.status(400).json({error:'Cancelled orders cannot be changed.'});
@@ -448,7 +619,7 @@ app.get('/api/rider/jobs', auth, role('rider'), run(async(req,res)=>{
   res.json({isOnline:Boolean(Number(req.user.is_online)),available:await Promise.all(available.map(x=>getOrderDetails(x.id))),active:await Promise.all(active.map(x=>getOrderDetails(x.id))),history:await Promise.all(history.map(x=>getOrderDetails(x.id)))});
 }));
 app.patch('/api/rider/availability', auth, role('rider'), run(async(req,res)=>{
-  const isOnline=Boolean(req.body.isOnline);await query('UPDATE users SET is_online=$1 WHERE id=$2',[isOnline?1:0,req.user.id]);const user=await one('SELECT id,name,email,role,store_id,is_active,is_online,created_at FROM users WHERE id=$1',[req.user.id]);res.json({isOnline:Boolean(Number(user.is_online)),user});
+  const isOnline=Boolean(req.body.isOnline);await query('UPDATE users SET is_online=$1 WHERE id=$2',[isOnline?1:0,req.user.id]);const user=await one('SELECT id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at FROM users WHERE id=$1',[req.user.id]);res.json({isOnline:Boolean(Number(user.is_online)),user});
 }));
 app.post('/api/orders/:id/accept-rider', auth, role('rider'), run(async(req,res)=>{
   const client=await pool.connect();try{await client.query('BEGIN');const rider=await one('SELECT * FROM users WHERE id=$1 FOR UPDATE',[req.user.id],client);if(!rider||!Number(rider.is_online)) {await client.query('ROLLBACK');return res.status(409).json({error:'Go online before accepting a delivery.'});}
@@ -470,7 +641,7 @@ app.post('/api/admin/users', auth, role('superadmin'), run(async(req,res)=>{
   const name=typeof req.body.name==='string'?req.body.name.trim():'';const email=typeof req.body.email==='string'?req.body.email.trim().toLowerCase():'';const password=req.body.password;const roleName=req.body.role;const storeId=req.body.storeId==null||req.body.storeId===''?null:Number(req.body.storeId);
   if(!name||!validEmail(email)||typeof password!=='string'||password.length<8)return res.status(400).json({error:'Enter a name, valid email, and password with at least 8 characters.'});if(!allowedRoles.has(roleName))return res.status(400).json({error:'Choose a valid role.'});
   if(['store_manager','rider'].includes(roleName)&&(!storeId||!await getStore(storeId)))return res.status(400).json({error:'Store managers and riders must be assigned to an existing store.'});
-  try{const user=await one('INSERT INTO users(name,email,password_hash,role,store_id,created_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,store_id,is_active,is_online,created_at',[name,email,await bcrypt.hash(password,10),roleName,['store_manager','rider'].includes(roleName)?storeId:null,nowIso()]);res.status(201).json({user});}catch(e){if(e.code==='23505')return res.status(409).json({error:'That email address is already registered.'});throw e;}
+  try{const user=await one('INSERT INTO users(name,email,password_hash,role,store_id,created_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at',[name,email,await bcrypt.hash(password,10),roleName,['store_manager','rider'].includes(roleName)?storeId:null,nowIso()]);res.status(201).json({user});}catch(e){if(e.code==='23505')return res.status(409).json({error:'That email address is already registered.'});throw e;}
 }));
 app.patch('/api/admin/users/:id', auth, role('superadmin'), run(async(req,res)=>{
   const current=await one('SELECT * FROM users WHERE id=$1',[Number(req.params.id)]);if(!current)return res.status(404).json({error:'Account not found.'});
@@ -478,7 +649,7 @@ app.patch('/api/admin/users/:id', auth, role('superadmin'), run(async(req,res)=>
   if(!name||!validEmail(email)||!allowedRoles.has(newRole))return res.status(400).json({error:'Enter a valid name, email, and role.'});if(['store_manager','rider'].includes(newRole)&&(!storeId||!await getStore(storeId)))return res.status(400).json({error:'Store managers and riders must be assigned to an existing store.'});
   if(current.role==='superadmin'&&(newRole!=='superadmin'||!active)){const cnt=Number((await one("SELECT COUNT(*)::int AS count FROM users WHERE role='superadmin' AND is_active=1")).count);if(cnt<=1)return res.status(400).json({error:'At least one active Super Admin must remain.'});}
   const client=await pool.connect();try{await client.query('BEGIN');if(newRole==='store_manager'&&storeId!==null)await query("UPDATE users SET store_id=NULL WHERE role='store_manager' AND store_id=$1 AND id<>$2",[storeId,current.id],client);await query('UPDATE users SET name=$1,email=$2,role=$3,store_id=$4,is_active=$5 WHERE id=$6',[name,email,newRole,['store_manager','rider'].includes(newRole)?storeId:null,active?1:0,current.id],client);await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');if(e.code==='23505')return res.status(409).json({error:'That email address is already registered.'});throw e;}finally{client.release();}
-  res.json({user:await one('SELECT id,name,email,role,store_id,is_active,is_online,created_at FROM users WHERE id=$1',[current.id])});
+  res.json({user:await one('SELECT id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at FROM users WHERE id=$1',[current.id])});
 }));
 app.get('/api/admin/stores', auth, role('superadmin'), run(async(_req,res)=>{const stores=await many(`SELECT s.*,m.id AS manager_id,m.name AS manager_name,m.email AS manager_email,ROUND((SELECT AVG(score) FROM ratings r WHERE r.store_id=s.id AND r.is_visible=1)::numeric,1) AS rating,(SELECT COUNT(*)::int FROM ratings r WHERE r.store_id=s.id AND r.is_visible=1) AS rating_count FROM stores s LEFT JOIN users m ON m.store_id=s.id AND m.role='store_manager' ORDER BY s.id`);res.json({stores});}));
 app.post('/api/admin/stores', auth, role('superadmin'), run(async(req,res)=>{const name=typeof req.body.name==='string'?req.body.name.trim():'';if(!name)return res.status(400).json({error:'Store name is required.'});const s=await one('INSERT INTO stores(name,description,image_url,location_name,maps_url,created_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[name,String(req.body.description||'').trim(),String(req.body.imageUrl||'/images/hero-food.png').trim(),String(req.body.locationName||'').trim(),String(req.body.mapsUrl||'').trim(),nowIso()]);res.status(201).json({store:s});}));

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bike, Heart, Home, LogOut, Moon, Package, Settings2, ShoppingCart, Store, Sun, Utensils, UserRound, Users, Star, ListOrdered, CircleHelp } from 'lucide-react';
+import { Bike, Heart, Home, LogOut, Moon, Package, Settings2, ShoppingCart, Store, Sun, Utensils, UserRound, Users, Star, ListOrdered, CircleHelp, MailCheck } from 'lucide-react';
 import { apiRequest, clearSession, getToken, money, saveSession, roleLabel } from './lib/api.js';
 import { LoginPage } from './components/LoginPage.jsx';
 import { CustomerHomePage } from './pages/customer/CustomerHomePage.jsx';
@@ -11,10 +11,11 @@ import { CustomerOrderConfirmationPage } from './pages/customer/CustomerOrderCon
 import { ManagerDashboard } from './pages/manager/ManagerDashboard.jsx';
 import { AdminDashboard } from './pages/admin/AdminDashboard.jsx';
 import { RiderDashboard } from './pages/rider/RiderDashboard.jsx';
+import { VerificationPage } from './pages/VerificationPage.jsx';
+import { AccountProfilePage } from './pages/AccountProfilePage.jsx';
 import './styles.css';
 import './role-styles.css';
 import './enhancements.css';
-import './readability.css';
 
 const navigation = {
     customer: [
@@ -62,6 +63,7 @@ function App() {
     const [user, setUser] = useState(null);
     const [checkingSession, setCheckingSession] = useState(Boolean(getToken()));
     const [page, setPage] = useState('customer-home');
+    const [verificationToken, setVerificationToken] = useState(() => new URLSearchParams(window.location.search).get('verify') || '');
     const [stores, setStores] = useState([]);
     const [products, setProducts] = useState([]);
     const [selectedStore, setSelectedStore] = useState(null);
@@ -520,15 +522,21 @@ function App() {
         }
     }
 
-    async function saveProfile(name) {
+    async function saveProfile(profile) {
         try {
-            const result = await apiRequest('/auth/profile', { method: 'PATCH', body: { name } });
+            const result = await apiRequest('/auth/profile', { method: 'PATCH', body: profile });
             setUser(result.user);
             saveSession(getToken(), result.user);
             notify('Profile updated.');
+            return true;
         } catch (error) {
             notify(error.message);
+            return false;
         }
+    }
+
+    if (verificationToken) {
+        return <div className={`app-shell ${dark ? 'dark' : ''}`}><VerificationPage token={verificationToken} onDone={() => { window.history.replaceState({}, '', window.location.pathname); setVerificationToken(''); if (getToken()) { setCheckingSession(true); apiRequest('/auth/me').then((result) => { setUser(result.user); setPage(getHomePage(result.user.role)); }).catch(() => clearSession()).finally(() => setCheckingSession(false)); } }} /></div>;
     }
 
     if (checkingSession) {
@@ -553,10 +561,12 @@ function App() {
                 </button>
                 <div className="top-actions">
                     <span className="role-chip">{roleLabel(user.role)}</span>
+                    {!Number(user.email_verified) && <button className="secondary-button small-button verify-email-topbar" onClick={() => navigate('verify-account')}><MailCheck size={14} /> Verify email</button>}
                     {isCustomer && <button className="header-cart-button" onClick={() => navigate('customer-cart')}><ShoppingCart size={18} /><span>Cart</span>{cartCount > 0 && <b>{cartCount}</b>}</button>}
                     <button className="icon-button theme-toggle" onClick={() => setDark((current) => !current)} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
-                    <button className="profile-chip" onClick={() => isCustomer && navigate('customer-profile')}>
-                        <span className="avatar">{user.name.trim().charAt(0).toUpperCase()}</span>
+                    <button className="profile-chip" onClick={() => navigate(isCustomer ? 'customer-profile' : 'account-profile')}>
+
+                        <span className="avatar">{user.profile_image_url ? <img src={user.profile_image_url} alt="" /> : user.name.trim().charAt(0).toUpperCase()}</span>
                         <span className="profile-chip-name">{user.name}</span>
                     </button>
                     <button className="icon-button" onClick={handleLogout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
@@ -584,10 +594,10 @@ function App() {
                     <div className="sidebar-help">
                         <div className="help-icon"><CircleHelp size={19} /></div>
                         <strong>{isCustomer ? 'Need a hand?' : 'Demo environment'}</strong>
-                        <p>{isCustomer ? 'Orders and tracking are saved to your DormDish account.' : 'This workspace uses seeded test data and simulated delivery updates.'}</p>
+                        <p>{isCustomer ? 'Orders and tracking are saved in the local SQLite database.' : 'This workspace uses seeded test data and simulated delivery updates.'}</p>
                         {isCustomer && <a href="https://www.google.com/maps?cid=2385593826430662165&g_mp=CiVnb29nbGUubWFwcy5wbGFjZXMudjEuUGxhY2VzLkdldFBsYWNlEAMYASAF" target="_blank" rel="noreferrer">View store location</a>}
                     </div>
-                    <div className="sidebar-footer">© 2026 DormDish PH<br /><span>DormDish ordering and delivery</span></div>
+                    <div className="sidebar-footer">© 2026 DormDish PH<br /><span>Local SQLite school demo</span></div>
                 </aside>
                 <main className="main-content">
                     <div key={page} className="page-transition">
@@ -597,7 +607,7 @@ function App() {
                         {isCustomer && page === 'customer-order-confirmation' && lastPlacedOrder && <CustomerOrderConfirmationPage order={lastPlacedOrder} onTrack={() => navigate('customer-orders')} onContinue={() => navigate('customer-home')} />}
                         {isCustomer && page === 'customer-cart' && <CustomerCartPage cart={cart} address={address} onAddress={setAddress} payment={payment} onPayment={setPayment} orderNotes={orderNotes} onOrderNotes={setOrderNotes} onQuantity={changeQuantity} onRemove={removeFromCart} onPlaceOrder={placeOrder} onBack={() => navigate(selectedStore ? 'customer-menu' : 'customer-home')} busy={placingOrder || groupBusy} deliveryFee={deliveryFee} studentDiscountPercent={studentDiscountPercent} groupOrder={groupOrder} isGroupHost={Number(groupOrder?.host_customer_id) === Number(user.id)} onCreateGroupOrder={createGroupOrder} onJoinGroupOrder={joinGroupOrder} onAddCartToGroup={addCartToGroupOrder} onPlaceGroupOrder={placeGroupOrder} onRefreshGroupOrder={refreshGroupOrder} onLeaveOrCancelGroup={leaveOrCancelGroupOrder} />}
                         {isCustomer && page === 'customer-favorites' && <div className="page-stack">
-                            <div className="dashboard-section-heading"><div><span className="eyebrow">SAVED FOR LATER</span><h1>Favorite meals</h1><p>Favorites are saved on this device while product information comes from the DormDish menu.</p></div></div>
+                            <div className="dashboard-section-heading"><div><span className="eyebrow">SAVED FOR LATER</span><h1>Favorite meals</h1><p>Favorites are saved on this device while product information comes from SQLite.</p></div></div>
                             {products.filter((product) => favorites.includes(product.id)).length ? (
                                 <div className="product-grid role-product-grid">
                                     {products.filter((product) => favorites.includes(product.id)).map((product) => (
@@ -619,7 +629,9 @@ function App() {
                                 <div className="dashboard-empty"><Heart size={28} /><h3>No favorites yet</h3><p>Open a store menu and save your favorite products from there.</p><button className="primary-button" onClick={() => navigate('customer-home')}>Browse stores</button></div>
                             )}
                         </div>}
-                        {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={setAddress} onSave={saveProfile} orders={orders} favorites={favorites} />}
+                        {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={setAddress} onSave={saveProfile} onVerify={() => navigate('verify-account')} orders={orders} favorites={favorites} />}
+                        {!isCustomer && page === 'account-profile' && <AccountProfilePage user={user} onSave={saveProfile} onVerify={() => navigate('verify-account')} />}
+                        {page === 'verify-account' && <VerificationPage user={user} onBack={() => navigate(getHomePage(user.role))} />}
                         {isManager && page.startsWith('manager-') && <ManagerDashboard key={user.id} user={user} page={page} onToast={notify} />}
                         {isAdmin && page.startsWith('admin-') && <AdminDashboard key={user.id} page={page} onToast={notify} />}
                         {isRider && page === 'rider-dashboard' && <RiderDashboard onToast={notify} />}

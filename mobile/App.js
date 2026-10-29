@@ -14,7 +14,7 @@ import {
 import { WebView } from 'react-native-webview';
 
 const DEFAULT_WEBSITE_URL = 'https://dormdishmobile-static.onrender.com/';
-const API_ORIGIN = 'https://dormdish-api.onrender.com';
+const API_ORIGIN = 'https://dormdishmobile.onrender.com';
 
 function getOrigin(value) {
   const match = String(value || '').trim().match(/^(https?:\/\/[^/?#]+)/i);
@@ -107,7 +107,7 @@ const INJECTED_APP_SCRIPT = String.raw`
 
     window.fetch = function (input, init) {
       var requestUrl = typeof input === 'string' ? input : (input && input.url) || '';
-      if (requestUrl.indexOf('https://dormdish-api.onrender.com/api/') !== 0) {
+      if (requestUrl.indexOf('https://dormdishmobile.onrender.com/api/') !== 0) {
         return originalFetch(input, init);
       }
 
@@ -249,7 +249,7 @@ export default function App() {
         const originalContentType = response.headers.get('content-type') || 'application/json';
         const originalBody = await response.text();
         if (isRouteHtml404(response.status, originalContentType, originalBody)) {
-          const unprefixedUrl = targetUrl.replace(/^https:\/\/dormdish-api\.onrender\.com\/api(?=\/|[?#]|$)/i, API_ORIGIN);
+          const unprefixedUrl = targetUrl.replace(/^https:\/\/dormdishmobile\.onrender\.com\/api(?=\/|[?#]|$)/i, API_ORIGIN);
           if (unprefixedUrl !== targetUrl) {
             const fallbackResponse = await fetch(unprefixedUrl, requestInit);
             const fallbackContentType = fallbackResponse.headers.get('content-type') || 'application/json';
@@ -310,6 +310,7 @@ export default function App() {
       originWhitelist={['http://*', 'https://*']}
       javaScriptEnabled
       domStorageEnabled
+      geolocationEnabled
       sharedCookiesEnabled
       thirdPartyCookiesEnabled
       allowsBackForwardNavigationGestures
