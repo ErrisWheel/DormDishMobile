@@ -19,6 +19,12 @@ const childEnvironment = {
     DATABASE_URL: '',
     SMTP_USER: '',
     SMTP_PASS: '',
+    RESEND_API_KEY: '',
+    EMAIL_PROVIDER: 'smtp',
+    EMAIL_FROM: '',
+    RESEND_API_KEY: '',
+    EMAIL_PROVIDER: 'smtp',
+    EMAIL_FROM: '',
     DEMO_SUPERADMIN_PASSWORD: process.env.DEMO_SUPERADMIN_PASSWORD || 'Admin123!',
     DEMO_MANAGER_PASSWORD: process.env.DEMO_MANAGER_PASSWORD || 'Manager123!',
     DEMO_CUSTOMER_PASSWORD: process.env.DEMO_CUSTOMER_PASSWORD || 'Customer123!',
@@ -295,4 +301,67 @@ test('admin cannot create customer accounts through staff account creation', asy
     }, superadminToken);
     assert.equal(result.status, 400);
     assert.match(result.body.error, /New accounts must be/i);
+});
+
+
+test('public signup creates a customer with a saved delivery address', async () => {
+    const email = `signup-${Date.now()}@example.test`;
+    const created = await request('/auth/register', {
+        method: 'POST',
+        body: {
+            name: 'Signup Test Customer',
+            email,
+            password: 'TestSignup123!',
+            contactNumber: '09123456789',
+            recipientName: 'Signup Test Customer',
+            addressLabel: 'Dorm',
+            addressText: 'Building A, Room 201, Quezon City',
+            deliveryInstructions: 'Meet at lobby and call on arrival.'
+        }
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.user.role, 'customer');
+    assert.ok(created.body.token);
+
+    const list = await request('/customer/addresses', {}, created.body.token);
+    assert.equal(list.status, 200);
+    assert.equal(list.body.addresses.length, 1);
+    assert.equal(list.body.addresses[0].address_label, 'Dorm');
+    assert.equal(list.body.addresses[0].delivery_instructions, 'Meet at lobby and call on arrival.');
+
+    const added = await request('/customer/addresses', {
+        method: 'POST',
+        body: {
+            addressLabel: 'Campus Gate',
+            recipientName: 'Signup Test Customer',
+            contactNumber: '09123456789',
+            addressText: 'Main campus gate, Quezon City',
+            deliveryInstructions: 'Meet beside the guardhouse.'
+        }
+    }, created.body.token);
+    assert.equal(added.status, 201);
+    const reloaded = await request('/customer/addresses', {}, created.body.token);
+    assert.equal(reloaded.status, 200);
+    assert.equal(reloaded.body.addresses.length, 2);
+
+    const mapOnly = await request('/customer/addresses', {
+        method: 'POST',
+        body: {
+            addressLabel: 'Map Pin Only',
+            recipientName: 'Signup Test Customer',
+            contactNumber: '09123456789',
+            addressText: '',
+            latitude: 14.6236,
+            longitude: 121.0614,
+            deliveryInstructions: 'Meet at the lobby.'
+        }
+    }, created.body.token);
+    assert.equal(mapOnly.status, 201);
+    assert.match(mapOnly.body.address.address_text, /^14\.623600, 121\.061400$/);
+
+    const forbiddenStaffCreation = await request('/admin/users', {
+        method: 'POST',
+        body: { name: 'Not Admin', email: `staff-${Date.now()}@example.test`, password: 'TestSignup123!', role: 'store_manager' }
+    }, created.body.token);
+    assert.equal(forbiddenStaffCreation.status, 403);
 });

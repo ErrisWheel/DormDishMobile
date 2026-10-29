@@ -45,6 +45,22 @@ export function initializeDatabase() {
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS customer_addresses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            address_label TEXT NOT NULL DEFAULT 'Home',
+            recipient_name TEXT NOT NULL,
+            contact_number TEXT NOT NULL,
+            address_text TEXT NOT NULL,
+            delivery_instructions TEXT NOT NULL DEFAULT '',
+            latitude REAL,
+            longitude REAL,
+            is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_customer_addresses_user ON customer_addresses(customer_id, is_default DESC, id);
+
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             store_id INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,

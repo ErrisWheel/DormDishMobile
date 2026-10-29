@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowRight, Mail, Moon, ShieldCheck, Sun, Utensils } from 'lucide-react';
 import { apiRequest, saveSession } from '../lib/api.js';
 
-export function LoginPage({ onLogin, onSupport, dark, onToggleDark }) {
+export function LoginPage({ onLogin, onSupport, onSignUp, dark, onToggleDark }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -51,6 +51,9 @@ export function LoginPage({ onLogin, onSupport, dark, onToggleDark }) {
                         <ArrowRight size={17} />
                     </button>
                 </form>
+                <button className="secondary-button full-button" type="button" onClick={onSignUp}>
+                    New to DormDish? Sign up <ArrowRight size={16} />
+                </button>
                 <button className="secondary-button full-button auth-support-button" type="button" onClick={onSupport}>
                     <Mail size={16} /> Contact support
                 </button>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bike, Heart, Home, LogOut, Moon, Package, Settings2, ShoppingCart, Store, Sun, Utensils, UserRound, Users, Star, ListOrdered, CircleHelp, MailCheck } from 'lucide-react';
 import { apiRequest, clearSession, getToken, money, saveSession, roleLabel } from './lib/api.js';
 import { LoginPage } from './components/LoginPage.jsx';
+import { SignupPage } from './components/SignupPage.jsx';
 import { CustomerHomePage } from './pages/customer/CustomerHomePage.jsx';
 import { StoreMenuPage } from './pages/customer/StoreMenuPage.jsx';
 import { CustomerOrdersPage } from './pages/customer/CustomerOrdersPage.jsx';
@@ -75,7 +76,10 @@ function App() {
     const [lastPlacedOrder, setLastPlacedOrder] = useState(null);
     const [cart, setCart] = useState(() => readStoredJson('dormdish-cart', []));
     const [favorites, setFavorites] = useState(() => readStoredJson('dormdish-favorites', []));
-    const [address, setAddress] = useState(() => localStorage.getItem('dormdish-address') || 'TIPQC Main Building');
+    const [address, setAddress] = useState('');
+    const [savedAddresses, setSavedAddresses] = useState([]);
+    const [selectedAddressId, setSelectedAddressId] = useState('');
+    const [deliveryInstructions, setDeliveryInstructions] = useState('');
     const [payment, setPayment] = useState('Cash on delivery');
     const [orderNotes, setOrderNotes] = useState(() => localStorage.getItem('dormdish-order-notes') || '');
     const orderPlacementLock = useRef(false);
@@ -100,10 +104,6 @@ function App() {
     useEffect(() => {
         localStorage.setItem('dormdish-favorites', JSON.stringify(favorites));
     }, [favorites]);
-
-    useEffect(() => {
-        localStorage.setItem('dormdish-address', address);
-    }, [address]);
 
     useEffect(() => {
         localStorage.setItem('dormdish-order-notes', orderNotes);
@@ -152,12 +152,13 @@ function App() {
         if (!silent) setLoadingCustomerData(true);
 
         try {
-            const [storeResult, productResult, orderResult, settingsResult, groupResult] = await Promise.all([
+            const [storeResult, productResult, orderResult, settingsResult, groupResult, addressResult] = await Promise.all([
                 apiRequest('/stores'),
                 apiRequest('/products'),
                 apiRequest('/orders'),
                 apiRequest('/settings/public'),
-                apiRequest('/group-orders/mine')
+                apiRequest('/group-orders/mine'),
+                apiRequest('/customer/addresses')
             ]);
 
             setStores(storeResult.stores);
@@ -166,6 +167,14 @@ function App() {
             setDeliveryFee(Number(settingsResult.settings.delivery_fee || 20));
             setStudentDiscountPercent(Number(settingsResult.settings.student_discount_percent || 5));
             setGroupOrder(groupResult.groupOrder);
+            const addresses = addressResult.addresses || [];
+            setSavedAddresses(addresses);
+            const selected = addresses.find((item) => String(item.id) === String(selectedAddressId)) || addresses.find((item) => Number(item.is_default)) || addresses[0];
+            if (selected) {
+                setSelectedAddressId(String(selected.id));
+                setAddress((current) => !current || current === 'TIPQC Main Building' ? selected.address_text : current);
+                setDeliveryInstructions((current) => current || selected.delivery_instructions || '');
+            }
         } catch (error) {
             if (error.status === 401) {
                 handleLogout({ skipConfirm: true });
@@ -175,7 +184,7 @@ function App() {
         } finally {
             if (!silent) setLoadingCustomerData(false);
         }
-    }, [user, notify]);
+    }, [user, notify, selectedAddressId]);
 
     useEffect(() => {
         if (user?.role !== 'customer') {
@@ -192,12 +201,12 @@ function App() {
 
     const activeNavigation = useMemo(() => navigation[user?.role] || [], [user?.role]);
 
-    function handleLogin(nextUser) {
+    function handleLogin(nextUser, authResult = null) {
         setUser(nextUser);
         setPage(getHomePage(nextUser.role));
         setSelectedStore(null);
         setStoreProducts([]);
-        notify(`Welcome, ${nextUser.name}.`);
+        notify(authResult?.verificationMessage || `Welcome, ${nextUser.name}.`);
     }
 
     function handleLogout({ skipConfirm = false } = {}) {
@@ -211,7 +220,11 @@ function App() {
         setGroupOrder(null);
         setCart([]);
         setFavorites([]);
-        setAddress('TIPQC Main Building');
+        setAddress('');
+        localStorage.removeItem('dormdish-address');
+        setSavedAddresses([]);
+        setSelectedAddressId('');
+        setDeliveryInstructions('');
         setOrderNotes('');
         localStorage.removeItem('dormdish-order-notes');
         notify('You have signed out.');
@@ -288,6 +301,34 @@ function App() {
             : [...current, productId]);
     }
 
+    function selectSavedAddress(addressId) {
+        const selected = savedAddresses.find((item) => String(item.id) === String(addressId));
+        setSelectedAddressId(selected ? String(selected.id) : '');
+        setAddress(selected?.address_text || '');
+        setDeliveryInstructions(selected?.delivery_instructions || '');
+    }
+
+    function updateCheckoutAddress(value) {
+        setAddress(value);
+        setSelectedAddressId('');
+        setDeliveryInstructions('');
+    }
+
+    async function refreshSavedAddresses() {
+        const result = await apiRequest('/customer/addresses');
+        setSavedAddresses(result.addresses || []);
+        const selected = (result.addresses || []).find((item) => String(item.id) === String(selectedAddressId)) || (result.addresses || []).find((item) => Number(item.is_default)) || (result.addresses || [])[0];
+        if (selected) {
+            setSelectedAddressId(String(selected.id));
+            setAddress(selected.address_text);
+            setDeliveryInstructions(selected.delivery_instructions || '');
+        } else {
+            setSelectedAddressId('');
+            setAddress('');
+            setDeliveryInstructions('');
+        }
+    }
+
     async function placeOrder() {
         if (orderPlacementLock.current || placingOrder) return;
 
@@ -349,7 +390,7 @@ function App() {
                     items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })),
                     deliveryAddress: address,
                     paymentMethod: payment,
-                    orderNotes
+                    orderNotes: [orderNotes.trim(), deliveryInstructions.trim() ? `Delivery instructions: ${deliveryInstructions.trim()}` : ''].filter(Boolean).join('\n\n')
                 }
             });
 
@@ -548,7 +589,9 @@ function App() {
     }
 
     if (!user) {
-        return <div className={`app-shell ${dark ? 'dark' : ''}`}>{page === 'support' ? <SupportPage onBack={() => setPage('customer-home')} /> : <LoginPage onLogin={handleLogin} onSupport={() => setPage('support')} dark={dark} onToggleDark={() => setDark((current) => !current)} />}</div>;
+        return <div className={`app-shell ${dark ? 'dark' : ''}`}>
+            {page === 'support' ? <SupportPage onBack={() => setPage('customer-home')} /> : page === 'signup' ? <SignupPage onLogin={handleLogin} onBack={() => setPage('customer-home')} /> : <LoginPage onLogin={handleLogin} onSignUp={() => setPage('signup')} onSupport={() => setPage('support')} dark={dark} onToggleDark={() => setDark((current) => !current)} />}
+        </div>;
     }
 
     const isCustomer = user.role === 'customer';
@@ -611,7 +654,7 @@ function App() {
                         {isCustomer && page === 'customer-menu' && <StoreMenuPage store={selectedStore} products={storeProducts} onBack={() => navigate('customer-home')} onAdd={addToCart} query={menuSearch} onQuery={setMenuSearch} favorites={favorites} onFavorite={toggleFavorite} />}
                         {isCustomer && page === 'customer-orders' && <CustomerOrdersPage orders={orders} onRefresh={() => refreshCustomerData(false)} onBrowse={() => navigate('customer-home')} onToast={notify} />}
                         {isCustomer && page === 'customer-order-confirmation' && lastPlacedOrder && <CustomerOrderConfirmationPage order={lastPlacedOrder} onTrack={() => navigate('customer-orders')} onContinue={() => navigate('customer-home')} />}
-                        {isCustomer && page === 'customer-cart' && <CustomerCartPage cart={cart} address={address} onAddress={setAddress} payment={payment} onPayment={setPayment} orderNotes={orderNotes} onOrderNotes={setOrderNotes} onQuantity={changeQuantity} onRemove={removeFromCart} onPlaceOrder={placeOrder} onBack={() => navigate(selectedStore ? 'customer-menu' : 'customer-home')} busy={placingOrder || groupBusy} deliveryFee={deliveryFee} studentDiscountPercent={studentDiscountPercent} groupOrder={groupOrder} isGroupHost={Number(groupOrder?.host_customer_id) === Number(user.id)} onCreateGroupOrder={createGroupOrder} onJoinGroupOrder={joinGroupOrder} onAddCartToGroup={addCartToGroupOrder} onPlaceGroupOrder={placeGroupOrder} onRefreshGroupOrder={refreshGroupOrder} onLeaveOrCancelGroup={leaveOrCancelGroupOrder} />}
+                        {isCustomer && page === 'customer-cart' && <CustomerCartPage cart={cart} address={address} onAddress={updateCheckoutAddress} savedAddresses={savedAddresses} selectedAddressId={selectedAddressId} onSelectSavedAddress={selectSavedAddress} deliveryInstructions={deliveryInstructions} onDeliveryInstructions={setDeliveryInstructions} payment={payment} onPayment={setPayment} orderNotes={orderNotes} onOrderNotes={setOrderNotes} onQuantity={changeQuantity} onRemove={removeFromCart} onPlaceOrder={placeOrder} onBack={() => navigate(selectedStore ? 'customer-menu' : 'customer-home')} busy={placingOrder || groupBusy} deliveryFee={deliveryFee} studentDiscountPercent={studentDiscountPercent} groupOrder={groupOrder} isGroupHost={Number(groupOrder?.host_customer_id) === Number(user.id)} onCreateGroupOrder={createGroupOrder} onJoinGroupOrder={joinGroupOrder} onAddCartToGroup={addCartToGroupOrder} onPlaceGroupOrder={placeGroupOrder} onRefreshGroupOrder={refreshGroupOrder} onLeaveOrCancelGroup={leaveOrCancelGroupOrder} />}
                         {isCustomer && page === 'customer-favorites' && <div className="page-stack">
                             <div className="dashboard-section-heading"><div><span className="eyebrow">SAVED FOR LATER</span><h1>Favorite meals</h1><p>Favorites are saved on this device while product information comes from SQLite.</p></div></div>
                             {products.filter((product) => favorites.includes(product.id)).length ? (
@@ -635,7 +678,7 @@ function App() {
                                 <div className="dashboard-empty"><Heart size={28} /><h3>No favorites yet</h3><p>Open a store menu and save your favorite products from there.</p><button className="primary-button" onClick={() => navigate('customer-home')}>Browse stores</button></div>
                             )}
                         </div>}
-                        {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={setAddress} onSave={saveProfile} onVerify={() => navigate('verify-account')} orders={orders} favorites={favorites} />}
+                        {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={updateCheckoutAddress} addresses={savedAddresses} onRefreshAddresses={refreshSavedAddresses} onUseAddress={(saved) => { selectSavedAddress(saved.id); notify(`${saved.address_label} selected for checkout.`); }} onSave={saveProfile} onVerify={() => navigate('verify-account')} orders={orders} favorites={favorites} />}
                         {!isCustomer && page === 'account-profile' && <AccountProfilePage user={user} onSave={saveProfile} onVerify={() => navigate('verify-account')} />}
                         {page === 'verify-account' && <VerificationPage user={user} onBack={() => navigate(getHomePage(user.role))} />}
                         {page === 'support' && <SupportPage user={user} onBack={() => navigate(getHomePage(user.role))} />}

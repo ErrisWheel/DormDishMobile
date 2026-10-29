@@ -29,9 +29,22 @@ There are two separate Render services:
 - `PUBLIC_WEB_URL`: `https://dormdishmobile-static.onrender.com`
 - `CORS_ORIGIN`: `https://dormdishmobile-static.onrender.com` (no trailing slash)
 
-For Gmail verification, support email, and the admin SMTP test button, set these on the Web Service only:
+For verification emails, support messages, and the admin email test, **use Resend's HTTPS API on Render Free**. Render Free Web Services block outbound SMTP ports 25, 465, and 587, so Gmail SMTP times out before credentials are checked. On the Web Service, set:
 
 ```text
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=<your Resend API key>
+EMAIL_FROM=DormDish Delivery <no-reply@your-verified-domain>
+SUPPORT_EMAIL=dormdishdelivery@gmail.com
+SMTP_TEST_TO=dormdishdelivery@gmail.com
+```
+
+In Resend, add and verify a domain you control, then use a sender address on that verified domain in `EMAIL_FROM`. `SUPPORT_EMAIL` is the inbox that receives support requests; it can remain `dormdishdelivery@gmail.com`. Resend does not let you send production mail as an arbitrary `@gmail.com` address unless that sender/domain has been verified, and you cannot verify the `gmail.com` domain yourself. The sender displayed to recipients will therefore be the verified domain address, with the DormDish name.
+
+If you do not own a domain yet, Resend's onboarding sender can only be used within its test restrictions; it is not a complete production solution for sending verification links to arbitrary new customers. The alternative is upgrading the Render Web Service to a plan that permits outbound SMTP and setting `EMAIL_PROVIDER=smtp` with a fresh Gmail App Password:
+
+```text
+EMAIL_PROVIDER=smtp
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_SECURE=true
@@ -39,11 +52,10 @@ SMTP_USER=dormdishdelivery@gmail.com
 SMTP_PASS=<a newly generated Google App Password>
 SMTP_FROM=DormDish Delivery <dormdishdelivery@gmail.com>
 SUPPORT_EMAIL=dormdishdelivery@gmail.com
-# Optional; defaults to SUPPORT_EMAIL
 SMTP_TEST_TO=dormdishdelivery@gmail.com
 ```
 
-Do not reuse an app password that was pasted into a chat or otherwise exposed. Revoke that Google App Password, create a replacement with Google 2-Step Verification enabled, and enter the replacement directly in Render's environment settings. Do not put it in this ZIP, `.env.example`, or GitHub.
+Do not reuse an app password that was pasted into a chat or otherwise exposed. Revoke it and create a replacement if you choose SMTP. Never put the secret in this ZIP, `.env.example`, or GitHub.
 
 ### Static Site: `DormDishMobile-Static`
 
@@ -59,7 +71,7 @@ The Postgres backend applies additive schema changes on startup, including the u
 
 1. In the **DormDishMobile Web Service** environment, set `SEED_DEMO_ACCOUNTS=true`.
 2. Optionally set explicit passwords with `DEMO_SUPERADMIN_PASSWORD`, `DEMO_MANAGER_PASSWORD`, `DEMO_CUSTOMER_PASSWORD`, and `DEMO_RIDER_PASSWORD`. If omitted, the code uses the sample values in `.env.example`.
-3. Deploy or restart the Web Service once and check `/api/health` for build `dormdish-support-order-labels-smtp-test-2026-10-29` and the `demo-account-seeding` feature.
+3. Deploy or restart the Web Service once and check `/api/health` for build `dormdish-signup-addressbook-resend-https-2026-10-29` and the `demo-account-seeding` feature.
 4. **Immediately set `SEED_DEMO_ACCOUNTS=false` and redeploy.** While enabled, startup deliberately resets password hashes for the known `@dormdish.test` demo accounts so the specified demo passwords work. Do not leave demo credentials enabled on a public app longer than your demo requires.
 
 The default demo emails are:
@@ -93,7 +105,7 @@ The product, store, and profile controls offer file selection and camera capture
 - Logged-in users in every role can tap **Verify email** beside their role, or open their account profile. Customers can also open verification from **My profile**.
 - The backend emails a random single-use token. Only the SHA-256 hash is stored in the database. The token expires after 24 hours, and resend requests are throttled to once per minute.
 - The email link opens the static-site React page at `/?verify=...`, which calls `GET /api/auth/verify` to verify the account.
-- If the verification button returns a 503, check `SMTP_USER`, `SMTP_PASS`, and `PUBLIC_WEB_URL`. If sending returns 502, review the Web Service logs for the SMTP error code. Gmail App Password spaces are stripped automatically; the password must still be a valid, current App Password for `SMTP_USER`.
+- If the verification button returns a 503, check `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM`, and `PUBLIC_WEB_URL`. If sending returns 502 with provider `resend`, read the response detail: a 401/403 usually means the API key is invalid or lacks access, and a sender/domain error means `EMAIL_FROM` is not verified in Resend. If using SMTP on a plan that permits it, check `SMTP_USER` and `SMTP_PASS`; Gmail App Password spaces are stripped automatically.
 
 This adds verification and a visible verified state; it does not block sign-in or orders for unverified accounts.
 
@@ -103,20 +115,21 @@ Open `https://dormdishmobile.onrender.com/api/health`. Confirm:
 
 - `database` is `postgresql`
 - `build` is `dormdish-support-order-labels-smtp-test-2026-10-29`
-- `features` contains `demo-account-seeding`, `email-verification`, `image-upload`, `rider-live-gps`, and `rider-delivery-proof`
+- `features` contains `demo-account-seeding`, `email-verification`, `email-provider-resend-api`, `customer-signup`, `saved-customer-addresses`, `address-map-picker`, `image-upload`, `rider-live-gps`, and `rider-delivery-proof`
+- `emailVerification.emailProvider` is `resend` and `emailVerification.configured` is `true` after the Resend key and verified sender are configured
 
 Then test: demo login; upload a small profile image; request a verification email; move a test order to Ready for Pickup; accept it with a rider; confirm pickup with location enabled; open the customer order from another session; submit rider delivery proof and confirm that the customer sees Delivered plus the proof photo.
 
 
-## 8. Support messages and SMTP test
+## 8. Support messages and email delivery test
 
 - The login screen has a **Contact support** link; authenticated users can open support from the top bar. The form requires name, contact number, email address, and a message.
-- `POST /api/support` sends the message to `SUPPORT_EMAIL` (defaults to `dormdishdelivery@gmail.com`) using Nodemailer. Replies use the sender-provided email as `Reply-To`.
-- Super Admin → **Settings** → **Send test email** sends a real test message to `SMTP_TEST_TO` (defaults to `SUPPORT_EMAIL`) and returns the transport/authentication failure detail when it cannot send.
-- Set `SMTP_USER` to the Gmail account that generated the App Password. `SMTP_PASS` must be a current Google App Password, not the regular Gmail password. Port `465` requires `SMTP_SECURE=true`; if using port `587`, set `SMTP_SECURE=false` instead. After changing environment variables on Render, save and redeploy/restart the Web Service.
+- `POST /api/support` sends the message to `SUPPORT_EMAIL` (defaults to `dormdishdelivery@gmail.com`) using the configured provider (Resend HTTPS API or Nodemailer SMTP). Replies use the sender-provided email as `Reply-To`.
+- Super Admin → **Settings** → **Send test email** sends a real test message to `SMTP_TEST_TO` (defaults to `SUPPORT_EMAIL`) and returns the provider error detail when it cannot send.
+- For Render Free, use Resend HTTPS API as described in Section 2. SMTP port settings will not solve Render Free connection timeouts. After changing environment variables on Render, save and redeploy/restart the Web Service.
 
 ## 9. Order status labels
 
 The database keeps the existing status values so current orders do not need a risky data migration. Customer, manager, and rider screens display them as **Order Received** (`Pending`), **Processed** (`Confirmed`), **In Kitchen** (`Preparing`), **Ready for Pickup**, **On Delivery** (`Out for Delivery`), and **Delivered**. `Cancelled` stays separate. Riders still claim an order after it reaches Ready for Pickup.
 
-New staff accounts are created from Super Admin → Accounts. The create-account endpoint only accepts `superadmin`, `store_manager`, and `rider`; there is no public signup that allows visitors to elevate themselves to staff roles.
+New staff accounts are created from Super Admin → Accounts. The create-account endpoint only accepts `superadmin`, `store_manager`, and `rider`; public signup creates customer accounts only. Signup collects the customer's contact number and first saved address, with an address text field or a selectable map pin, a custom address label, and delivery instructions. Customers can add, edit, delete, and set a default for multiple saved addresses from their profile; saved addresses are stored in Neon or local SQLite, not only browser storage.

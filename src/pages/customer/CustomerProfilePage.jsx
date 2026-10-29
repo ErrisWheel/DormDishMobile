@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { BadgeCheck, Check, ExternalLink, Heart, MapPin, PackageCheck, ShieldCheck, UserRound, MailCheck } from 'lucide-react';
-import { deliveryDestinationUrl } from '../../lib/maps.js';
+import { BadgeCheck, Check, Heart, PackageCheck, ShieldCheck, UserRound, MailCheck } from 'lucide-react';
 import { ImageUploadField } from '../../components/ImageUploadField.jsx';
 import { MediaImage } from '../../components/MediaImage.jsx';
+import { AddressBook } from '../../components/AddressBook.jsx';
 
 // Profile
-export function CustomerProfilePage({ user, address, onAddress, onSave, onVerify, orders, favorites }) {
+export function CustomerProfilePage({ user, address, onAddress, addresses = [], onRefreshAddresses, onUseAddress, onSave, onVerify, orders, favorites }) {
     const [name, setName] = useState(user.name);
     const [profileImageUrl, setProfileImageUrl] = useState(user.profile_image_url || '');
     const [saving, setSaving] = useState(false);
@@ -48,18 +48,13 @@ export function CustomerProfilePage({ user, address, onAddress, onSave, onVerify
                     <button className="primary-button" type="button" onClick={onVerify}><MailCheck size={16} /> {Number(user.email_verified) ? 'View verification status' : 'Verify my account'}</button>
                 </section>
 
-                <section className="dashboard-panel profile-address-panel">
-                    <div className="panel-heading"><div><h2>Delivery address</h2><p>Used as the destination for new orders.</p></div><MapPin size={21} /></div>
-                    <label className="stacked-field">Usual delivery location<textarea value={address} onChange={(event) => onAddress(event.target.value)} rows="4" maxLength="240" placeholder="Building, dorm, room, or pickup point" /></label>
-                    <div className="address-guidance"><MapPin size={16} /><span>Be specific, such as your building, dorm, street, and a nearby landmark, so Google Maps can estimate the route more accurately.</span></div>
-                    <a className="secondary-button profile-map-link" href={deliveryDestinationUrl(address)} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Check address in Google Maps</a>
-                </section>
+                <AddressBook user={user} addresses={addresses} onRefresh={onRefreshAddresses} onUseAddress={onUseAddress} />
             </div>
 
             <div className="stats-grid profile-stats-grid">
                 <div className="stat-card profile-stat-card"><span>Orders placed</span><strong>{orders.length}</strong><small><PackageCheck size={14} /> Order history in DormDish</small></div>
                 <div className="stat-card profile-stat-card"><span>Saved favorites</span><strong>{favorites.length}</strong><small><Heart size={14} /> Saved on this device</small></div>
-                <div className="stat-card profile-stat-card"><span>Delivery address</span><strong className="profile-location-status">{address.trim() ? 'Saved locally' : 'Not set'}</strong><small><MapPin size={14} /> Used for future checkouts</small></div>
+                <div className="stat-card profile-stat-card"><span>Saved addresses</span><strong className="profile-location-status">{addresses.length}</strong><small><PackageCheck size={14} /> Stored in your DormDish account</small></div>
             </div>
         </div>
     );

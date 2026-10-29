@@ -36,11 +36,16 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
 
-// Nodemailer
+// Email provider
 const smtpUser = String(process.env.SMTP_USER || '').trim();
 const smtpPass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
 const smtpPort = Number(process.env.SMTP_PORT || 465);
 const smtpSecure = process.env.SMTP_SECURE === undefined ? smtpPort === 465 : String(process.env.SMTP_SECURE).toLowerCase() !== 'false';
+const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
+const emailProvider = String(process.env.EMAIL_PROVIDER || (resendApiKey ? 'resend' : 'smtp')).trim().toLowerCase();
+const emailFrom = String(emailProvider === 'resend'
+    ? (process.env.EMAIL_FROM || process.env.RESEND_FROM || '')
+    : (process.env.EMAIL_FROM || process.env.SMTP_FROM || (smtpUser ? `DormDish Delivery <${smtpUser}>` : ''))).trim();
 const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: smtpPort,
@@ -53,6 +58,47 @@ const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
 const publicWebUrl = String(process.env.PUBLIC_WEB_URL || process.env.FRONTEND_URL || 'https://dormdishmobile-static.onrender.com').trim().replace(/\/+$/, '');
 const supportEmail = String(process.env.SUPPORT_EMAIL || 'dormdishdelivery@gmail.com').trim();
 const smtpTestTo = String(process.env.SMTP_TEST_TO || supportEmail || smtpUser).trim();
+function emailConfigured() {
+    if (emailProvider === 'resend') return Boolean(resendApiKey && emailFrom);
+    return Boolean(mailer);
+}
+async function sendEmail(message) {
+    if (!emailConfigured()) {
+        throw new Error(emailProvider === 'resend'
+            ? 'Email delivery is not configured. Set RESEND_API_KEY and EMAIL_FROM.'
+            : 'SMTP is not configured. Set SMTP_USER and SMTP_PASS.');
+    }
+    if (emailProvider === 'resend') {
+        const payload = {
+            from: message.from || emailFrom,
+            to: Array.isArray(message.to) ? message.to : [message.to],
+            subject: message.subject,
+            ...(message.text ? { text: message.text } : {}),
+            ...(message.html ? { html: message.html } : {}),
+            ...((message.replyTo || message.reply_to) ? { reply_to: message.replyTo || message.reply_to } : {})
+        };
+        const response = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${resendApiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(15000)
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const error = new Error(result.message || result.error || `Email provider returned HTTP ${response.status}.`);
+            error.code = 'RESEND_API_ERROR';
+            error.responseCode = response.status;
+            error.command = 'HTTPS';
+            throw error;
+        }
+        return result;
+    }
+    return mailer.sendMail({ ...message, from: message.from || emailFrom });
+}
+async function verifyEmailTransport() {
+    if (!emailConfigured()) throw new Error(emailProvider === 'resend' ? 'Set RESEND_API_KEY and EMAIL_FROM.' : 'Set SMTP_USER and SMTP_PASS.');
+    if (emailProvider === 'smtp') await mailer.verify();
+}
 function normalizePublicApiUrl(value = '') {
     const raw = String(value || '').trim().replace(/\/+$/, '');
     if (!raw) return '';
@@ -69,13 +115,13 @@ function normalizePublicApiUrl(value = '') {
 const publicApiUrl = normalizePublicApiUrl(process.env.PUBLIC_API_URL || '');
 function getPublicApiUrl(_req) { return publicApiUrl || '/api'; }
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
-const verificationConfigured = () => Boolean(mailer && publicWebUrl);
+const verificationConfigured = () => Boolean(emailConfigured() && publicWebUrl);
 async function sendVerificationMessage(user, rawToken) {
-    if (!verificationConfigured()) throw new Error('Email verification is not configured. Set SMTP_USER, SMTP_PASS, and PUBLIC_WEB_URL.');
+    if (!verificationConfigured()) throw new Error('Email verification is not configured. Set RESEND_API_KEY and EMAIL_FROM (recommended on Render Free), or SMTP_USER, SMTP_PASS, and PUBLIC_WEB_URL on a host that permits SMTP.');
     const link = `${publicWebUrl}/?verify=${encodeURIComponent(rawToken)}`;
     const safeName = String(user.name || 'there').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-    await mailer.sendMail({
-        from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+    await sendEmail({
+        from: emailFrom,
         to: user.email,
         subject: 'Verify your DormDish account',
         text: `Hi ${user.name},\n\nVerify your DormDish account using this link (expires in 24 hours):\n${link}\n\nIf you did not request this email, you can ignore it.`,
@@ -228,7 +274,7 @@ function logTracking(orderId, updatedBy, status, note, locationLabel, etaAt) {
     `).run(orderId, updatedBy, status, note, locationLabel || '', etaAt || null, new Date().toISOString());
 }
 
-const API_BUILD = 'dormdish-support-order-labels-smtp-test-2026-10-29';
+const API_BUILD = 'dormdish-signup-addressbook-resend-https-2026-10-29';
 app.get('/api/health', (req, res) => {
     res.json({
         ok: true,
@@ -236,9 +282,10 @@ app.get('/api/health', (req, res) => {
         service: 'dormdish-api',
         build: API_BUILD,
         loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
-        features: ['demo-account-seeding','email-verification','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment','support-email','smtp-test','staff-account-creation','order-status-labels'],
-        emailVerification: { configured: verificationConfigured(), smtpConfigured: Boolean(mailer), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
-        supportEmail: { configured: Boolean(mailer && supportEmail), destination: supportEmail },
+        signupRoutes: ['POST /api/auth/register', 'POST /auth/register'],
+        features: ['demo-account-seeding','email-verification','email-provider-resend-api','customer-signup','saved-customer-addresses','address-map-picker','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment','support-email','email-delivery-test','staff-account-creation','order-status-labels'],
+        emailVerification: { configured: verificationConfigured(), emailProvider, emailConfigured: emailConfigured(), smtpConfigured: Boolean(mailer), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
+        supportEmail: { configured: Boolean(emailConfigured() && supportEmail), destination: supportEmail },
         timestamp: new Date().toISOString()
     });
 });
@@ -263,6 +310,64 @@ const loginHandler = (req, res) => {
 app.post('/api/auth/login', loginHandler);
 app.post('/auth/login', loginHandler);
 
+// Customer signup
+async function registerCustomer(req, res) {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const addressLabel = typeof req.body.addressLabel === 'string' ? req.body.addressLabel.trim().slice(0, 40) : 'Home';
+    const recipientName = typeof req.body.recipientName === 'string' && req.body.recipientName.trim() ? req.body.recipientName.trim().slice(0, 100) : name;
+    const contactNumber = typeof req.body.contactNumber === 'string' ? req.body.contactNumber.trim().slice(0, 30) : '';
+    let addressText = typeof req.body.addressText === 'string' ? req.body.addressText.trim().slice(0, 300) : '';
+    const instructions = typeof req.body.deliveryInstructions === 'string' ? req.body.deliveryInstructions.trim().slice(0, 500) : '';
+    const latitude = req.body.latitude === '' || req.body.latitude == null ? null : Number(req.body.latitude);
+    const longitude = req.body.longitude === '' || req.body.longitude == null ? null : Number(req.body.longitude);
+    const hasCoordinates = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+    if (name.length < 2 || name.length > 100) return res.status(400).json({ error: 'Enter your name (2–100 characters).' });
+    if (!isValidEmail(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (password.length < 8 || password.length > 128) return res.status(400).json({ error: 'Password must contain 8–128 characters.' });
+    if (contactNumber.length < 5) return res.status(400).json({ error: 'Enter a valid contact number.' });
+    if (!addressLabel) return res.status(400).json({ error: 'Give this address a name, such as Home or Dorm.' });
+    if (addressText.length < 5 && !hasCoordinates) return res.status(400).json({ error: 'Enter your delivery address or choose a point on the map.' });
+    if (!addressText && hasCoordinates) addressText = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+    const createdAt = new Date().toISOString();
+    let user;
+    try {
+        const create = db.transaction(() => {
+            const insert = db.prepare(`INSERT INTO users(name,email,password_hash,role,store_id,created_at) VALUES(?,?,?,'customer',NULL,?)`)
+                .run(name, email, bcrypt.hashSync(password, 12), createdAt);
+            const userId = Number(insert.lastInsertRowid);
+            db.prepare(`INSERT INTO customer_addresses(customer_id,address_label,recipient_name,contact_number,address_text,delivery_instructions,latitude,longitude,is_default,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,1,?,?)`).run(userId,addressLabel,recipientName,contactNumber,addressText,instructions,hasCoordinates?latitude:null,hasCoordinates?longitude:null,createdAt,createdAt);
+            return db.prepare('SELECT id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at FROM users WHERE id=?').get(userId);
+        });
+        user = create();
+    } catch (error) {
+        if (String(error.message).toLowerCase().includes('unique')) return res.status(409).json({ error: 'That email address is already registered. Try signing in instead.' });
+        console.error('Customer signup failed:', error.message);
+        return res.status(500).json({ error: 'Could not create your account. Please try again.' });
+    }
+    let verificationEmailSent = false;
+    let verificationMessage = 'Account created. Sign in and request an email verification link from your profile.';
+    if (verificationConfigured()) {
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        db.prepare('UPDATE users SET email_verification_token_hash=?,email_verification_expires_at=?,email_verification_sent_at=? WHERE id=?').run(sha256(rawToken),expiresAt,createdAt,user.id);
+        try {
+            await sendVerificationMessage(user, rawToken);
+            verificationEmailSent = true;
+            verificationMessage = `Verification email sent to ${user.email}.`;
+        } catch (error) {
+            db.prepare('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL,email_verification_sent_at=NULL WHERE id=?').run(user.id);
+            console.error('Signup verification email failed:', { provider: emailProvider, code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown email error' });
+            verificationMessage = `Account created, but verification email could not be sent (${error.code || 'EMAIL_ERROR'}). You can request another link from your profile after email delivery is configured.`;
+        }
+    }
+    return res.status(201).json({ token: createToken(user), user, verificationEmailSent, verificationMessage });
+}
+app.post('/api/auth/register', registerCustomer);
+app.post('/auth/register', registerCustomer);
+
 app.get('/api/auth/me', requireAuth, (req, res) => {
     res.json({ user: req.user });
 });
@@ -277,11 +382,77 @@ app.patch('/api/auth/profile', requireAuth, (req, res) => {
     res.json({ user });
 });
 
+// Customer address book
+function parseAddressPayload(body, fallback = {}) {
+    const label = Object.hasOwn(body, 'addressLabel') ? String(body.addressLabel || '').trim().slice(0, 40) : fallback.address_label;
+    const recipient = Object.hasOwn(body, 'recipientName') ? String(body.recipientName || '').trim().slice(0, 100) : fallback.recipient_name;
+    const phone = Object.hasOwn(body, 'contactNumber') ? String(body.contactNumber || '').trim().slice(0, 30) : fallback.contact_number;
+    const addressText = Object.hasOwn(body, 'addressText') ? String(body.addressText || '').trim().slice(0, 300) : fallback.address_text;
+    const instructions = Object.hasOwn(body, 'deliveryInstructions') ? String(body.deliveryInstructions || '').trim().slice(0, 500) : fallback.delivery_instructions || '';
+    const latRaw = Object.hasOwn(body, 'latitude') ? body.latitude : fallback.latitude;
+    const lngRaw = Object.hasOwn(body, 'longitude') ? body.longitude : fallback.longitude;
+    const latitude = latRaw === '' || latRaw == null ? null : Number(latRaw);
+    const longitude = lngRaw === '' || lngRaw == null ? null : Number(lngRaw);
+    const noCoordinates = latitude == null && longitude == null;
+    const hasCoordinates = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+    const coordinatesValid = noCoordinates || hasCoordinates;
+    const savedAddressText = addressText.length >= 5 ? addressText : (hasCoordinates ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` : addressText);
+    if (!label || !recipient || phone.length < 5 || savedAddressText.length < 5 || !coordinatesValid) return { error: 'Enter an address name, recipient, valid contact number, delivery address or map pin, and valid coordinates.' };
+    return { value: { address_label: label, recipient_name: recipient, contact_number: phone, address_text: savedAddressText, delivery_instructions: instructions, latitude: hasCoordinates ? latitude : null, longitude: hasCoordinates ? longitude : null, is_default: Object.hasOwn(body, 'isDefault') ? (body.isDefault ? 1 : 0) : Number(fallback.is_default || 0) } };
+}
+app.get('/api/customer/addresses', requireAuth, allowRoles('customer'), (req, res) => {
+    const addresses = db.prepare('SELECT * FROM customer_addresses WHERE customer_id=? ORDER BY is_default DESC, id ASC').all(req.user.id);
+    res.json({ addresses });
+});
+app.post('/api/customer/addresses', requireAuth, allowRoles('customer'), (req, res) => {
+    const parsed = parseAddressPayload(req.body || {}, { address_label: 'Home', recipient_name: req.user.name, contact_number: '', address_text: '', delivery_instructions: '' });
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const value = parsed.value;
+    const currentCount = Number(db.prepare('SELECT COUNT(*) AS count FROM customer_addresses WHERE customer_id=?').get(req.user.id).count);
+    const makeDefault = value.is_default || currentCount === 0;
+    const createdAt = new Date().toISOString();
+    const create = db.transaction(() => {
+        if (makeDefault) db.prepare('UPDATE customer_addresses SET is_default=0 WHERE customer_id=?').run(req.user.id);
+        const info = db.prepare(`INSERT INTO customer_addresses(customer_id,address_label,recipient_name,contact_number,address_text,delivery_instructions,latitude,longitude,is_default,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id,value.address_label,value.recipient_name,value.contact_number,value.address_text,value.delivery_instructions,value.latitude,value.longitude,makeDefault?1:0,createdAt,createdAt);
+        return db.prepare('SELECT * FROM customer_addresses WHERE id=?').get(info.lastInsertRowid);
+    });
+    res.status(201).json({ address: create() });
+});
+app.patch('/api/customer/addresses/:id', requireAuth, allowRoles('customer'), (req, res) => {
+    const current = db.prepare('SELECT * FROM customer_addresses WHERE id=? AND customer_id=?').get(Number(req.params.id),req.user.id);
+    if (!current) return res.status(404).json({ error: 'Saved address not found.' });
+    const parsed = parseAddressPayload(req.body || {}, current);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const value = parsed.value;
+    const updatedAt = new Date().toISOString();
+    const save = db.transaction(() => {
+        if (value.is_default) db.prepare('UPDATE customer_addresses SET is_default=0 WHERE customer_id=?').run(req.user.id);
+        db.prepare(`UPDATE customer_addresses SET address_label=?,recipient_name=?,contact_number=?,address_text=?,delivery_instructions=?,latitude=?,longitude=?,is_default=?,updated_at=? WHERE id=? AND customer_id=?`)
+            .run(value.address_label,value.recipient_name,value.contact_number,value.address_text,value.delivery_instructions,value.latitude,value.longitude,value.is_default,updatedAt,current.id,req.user.id);
+        return db.prepare('SELECT * FROM customer_addresses WHERE id=?').get(current.id);
+    });
+    res.json({ address: save() });
+});
+app.delete('/api/customer/addresses/:id', requireAuth, allowRoles('customer'), (req, res) => {
+    const current = db.prepare('SELECT * FROM customer_addresses WHERE id=? AND customer_id=?').get(Number(req.params.id),req.user.id);
+    if (!current) return res.status(404).json({ error: 'Saved address not found.' });
+    const remove = db.transaction(() => {
+        db.prepare('DELETE FROM customer_addresses WHERE id=? AND customer_id=?').run(current.id,req.user.id);
+        if (Number(current.is_default)) {
+            const next = db.prepare('SELECT id FROM customer_addresses WHERE customer_id=? ORDER BY id LIMIT 1').get(req.user.id);
+            if (next) db.prepare('UPDATE customer_addresses SET is_default=1 WHERE id=?').run(next.id);
+        }
+    });
+    remove();
+    res.json({ success: true });
+});
+
 app.post('/api/auth/verification/send', requireAuth, async (req, res) => {
     const user = db.prepare('SELECT id,name,email,email_verified,email_verification_sent_at FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'Account not found.' });
     if (Number(user.email_verified)) return res.json({ success: true, alreadyVerified: true, message: 'Your email is already verified.' });
-    if (!verificationConfigured()) return res.status(503).json({ error: 'Email verification is not configured. Set SMTP_USER, SMTP_PASS, and PUBLIC_WEB_URL in the backend environment.' });
+    if (!verificationConfigured()) return res.status(503).json({ error: 'Email verification is not configured. Set RESEND_API_KEY and EMAIL_FROM (recommended on Render Free), or SMTP_USER and SMTP_PASS on a host that permits SMTP.' });
     if (user.email_verification_sent_at && Date.now() - Date.parse(user.email_verification_sent_at) < 60000) return res.status(429).json({ error: 'Wait one minute before requesting another verification email.' });
     const rawToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -290,8 +461,8 @@ app.post('/api/auth/verification/send', requireAuth, async (req, res) => {
     catch (error) {
         db.prepare('UPDATE users SET email_verification_token_hash = NULL, email_verification_expires_at = NULL, email_verification_sent_at = NULL WHERE id = ?').run(user.id);
         console.error('Could not send verification email:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
-        const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
-        return res.status(502).json({ error: `Could not send verification email (${diagnostic}). Check SMTP credentials and Render logs.` });
+        const diagnostic = error.code || (error.responseCode ? `EMAIL_${error.responseCode}` : 'EMAIL_ERROR');
+        return res.status(502).json({ error: `Could not send verification email (${diagnostic}). Check the email provider configuration and Render logs.` });
     }
     return res.json({ success: true, message: `Verification email sent to ${user.email}.` });
 });
@@ -322,15 +493,15 @@ app.post('/api/support', async (req, res) => {
     if (contactNumber.length < 5 || contactNumber.length > 30) return res.status(400).json({ error: 'Enter a valid contact number.' });
     if (!isValidEmail(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
     if (message.length < 10 || message.length > 4000) return res.status(400).json({ error: 'Your message must contain 10–4000 characters.' });
-    if (!mailer) return res.status(503).json({ error: 'Support email is unavailable because SMTP_USER or SMTP_PASS is missing in the backend environment.' });
+    if (!emailConfigured()) return res.status(503).json({ error: emailProvider === 'resend' ? 'Email is unavailable. Configure RESEND_API_KEY and EMAIL_FROM on the backend.' : 'Email is unavailable because SMTP_USER or SMTP_PASS is missing.' });
     if (!supportEmail || !isValidEmail(supportEmail)) return res.status(503).json({ error: 'SUPPORT_EMAIL must contain a valid email address.' });
     const safeName = escapeMailHtml(name);
     const safeEmail = escapeMailHtml(email);
     const safeNumber = escapeMailHtml(contactNumber);
     const safeMessage = escapeMailHtml(message).replace(/\r?\n/g, '<br>');
     try {
-        await mailer.sendMail({
-            from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+        await sendEmail({
+            from: emailFrom,
             to: supportEmail,
             replyTo: email,
             subject: `[DormDish Support] ${name.replace(/[\r\n]+/g, ' ').slice(0, 80)}`,
@@ -339,30 +510,30 @@ app.post('/api/support', async (req, res) => {
         });
         return res.status(202).json({ success: true, message: 'Your message was sent to DormDish Support. We can reply to the email you provided.' });
     } catch (error) {
-        const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
+        const diagnostic = error.code || (error.responseCode ? `EMAIL_${error.responseCode}` : 'EMAIL_ERROR');
         console.error('Could not send support message:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
-        return res.status(502).json({ error: `Could not send your message (${diagnostic}). Check the SMTP environment variables and Render logs.` });
+        return res.status(502).json({ error: `Could not send your message (${diagnostic}). Check the configured email provider and Render logs.` });
     }
 });
 
-// SMTP test
+// Email test
 app.post('/api/admin/smtp-test', requireAuth, allowRoles('superadmin'), async (req, res) => {
-    if (!mailer) return res.status(503).json({ error: 'SMTP is not configured. Set SMTP_USER and SMTP_PASS on the DormDishMobile Web Service.' });
+    if (!emailConfigured()) return res.status(503).json({ error: emailProvider === 'resend' ? 'Set RESEND_API_KEY and EMAIL_FROM on the backend.' : 'Set SMTP_USER and SMTP_PASS on the backend, or configure Resend HTTPS API.' });
     if (!isValidEmail(smtpTestTo)) return res.status(503).json({ error: 'SMTP_TEST_TO or SUPPORT_EMAIL must be a valid email address.' });
     try {
-        await mailer.verify();
-        await mailer.sendMail({
-            from: process.env.SMTP_FROM || `DormDish Delivery <${smtpUser}>`,
+        await verifyEmailTransport();
+        await sendEmail({
+            from: emailFrom,
             to: smtpTestTo,
-            subject: 'DormDish SMTP test',
-            text: `This is a test email from the DormDish backend. SMTP authentication and outbound mail worked at ${new Date().toISOString()}.`
+            subject: `DormDish ${emailProvider.toUpperCase()} delivery test`,
+            text: `This is a test email from DormDish using ${emailProvider} at ${new Date().toISOString()}.`
         });
-        return res.json({ success: true, message: `SMTP test email sent to ${smtpTestTo}. Check that inbox and spam folder.` });
+        return res.json({ success: true, message: `${emailProvider.toUpperCase()} test email sent to ${smtpTestTo}. Check that inbox and spam folder.` });
     } catch (error) {
-        const diagnostic = error.code || (error.responseCode ? `SMTP_${error.responseCode}` : 'SMTP_ERROR');
-        const detail = String(error.message || 'Unknown SMTP error').replace(/[\r\n]+/g, ' ').slice(0, 240);
-        console.error('SMTP test failed:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: detail });
-        return res.status(502).json({ error: `SMTP test failed (${diagnostic}): ${detail}. Check Render logs and Gmail App Password settings.` });
+        const diagnostic = error.code || (error.responseCode ? `EMAIL_${error.responseCode}` : 'EMAIL_ERROR');
+        const detail = String(error.message || 'Unknown email error').replace(/[\r\n]+/g, ' ').slice(0, 240);
+        console.error('Email delivery test failed:', { provider: emailProvider, code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: detail });
+        return res.status(502).json({ error: `${emailProvider.toUpperCase()} test failed (${diagnostic}): ${detail}.` });
     }
 });
 

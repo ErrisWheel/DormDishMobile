@@ -1,0 +1,24 @@
+DormDish Signup + Email Provider + Saved Address Patch
+
+1. Extract this ZIP into E:\DormDishMobile, preserving the folder structure and overwriting the included files.
+2. In PowerShell:
+   cd E:\DormDishMobile
+   npm install
+   npm run build
+   npm test
+3. Push changes to GitHub and deploy both Render services (DormDishMobile Web Service and DormDishMobile-Static Static Site).
+4. In Render Web Service environment, use the Resend HTTPS API on Render Free:
+   EMAIL_PROVIDER=resend
+   RESEND_API_KEY=<your Resend API key>
+   EMAIL_FROM=DormDish Delivery <no-reply@your-verified-domain>
+   SUPPORT_EMAIL=dormdishdelivery@gmail.com
+   SMTP_TEST_TO=dormdishdelivery@gmail.com
+   PUBLIC_WEB_URL=https://dormdishmobile-static.onrender.com
+   PUBLIC_API_URL=https://dormdishmobile.onrender.com/api
+   CORS_ORIGIN=https://dormdishmobile-static.onrender.com
+   DATABASE_URL=<existing Neon connection string>
+5. Add and verify a domain you control in Resend before using EMAIL_FROM for real customer recipients. SUPPORT_EMAIL is the receiving inbox and can stay dormdishdelivery@gmail.com. Do not use an @gmail.com sender with Resend unless that domain is genuinely yours/verified.
+6. Keep Static Site VITE_API_URL=https://dormdishmobile.onrender.com/api and redeploy it after pushing.
+7. Do not include .env, API keys, or passwords in commits or the ZIP.
+
+If you need mail to be sent as dormdishdelivery@gmail.com specifically, upgrade the Render Web Service to a paid instance and use EMAIL_PROVIDER=smtp with a fresh Google App Password, since Render Free blocks outbound SMTP ports 25/465/587.

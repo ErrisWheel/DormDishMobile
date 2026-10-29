@@ -111,6 +111,12 @@ npm test
 
 The tests launch an isolated API process with a temporary SQLite database and check seeded ratings, role restrictions, manager product scope, authentication, order progress, ETA, tracking persistence, rider access, and customer ratings. The test database is deleted at the end.
 
+## Customer signup and saved addresses
+
+The sign-in page includes **Create customer account**. Public signup always creates a customer role; only a Super Admin can create staff accounts. Signup requires a contact number and the first saved delivery address, including a custom label such as Home or Dorm, recipient details, and rider instructions. Customers can type an address or choose a pin from the map, then manage multiple saved addresses from My Profile.
+
+On Render Free, configure email via the Resend HTTPS API rather than Gmail SMTP. See `FEATURES-DEPLOYMENT.md` for the required `EMAIL_PROVIDER`, `RESEND_API_KEY`, and verified `EMAIL_FROM` values. The receiving inbox can remain `dormdishdelivery@gmail.com`; `EMAIL_FROM` must use a sender on a domain verified with Resend. For local Gmail SMTP tests, set `EMAIL_PROVIDER=smtp`; Render Free still blocks outbound SMTP.
+
 ## Reset sample data
 
 Stop the development server first, then run:
@@ -127,4 +133,4 @@ The reset command deletes the default local SQLite database files. The next API 
 - The SQLite database is local to the machine running the API. The Android app does not contain its own SQLite file; it sends API requests to the development computer.
 - The default store names, ratings, products, prices, and customer addresses are demo records and can be edited through the provided manager/admin screens.
 - `VITE_API_URL` can be left blank for Vite web development and Android emulator use. Vite proxies `/api` to the local API while developing on desktop.
-- The original frontend-only demo screens have been replaced by role-specific data-backed screens. Browser storage is still used only for cart, favorites, theme preference, and the customer's usual delivery address.
+- The original frontend-only demo screens have been replaced by role-specific data-backed screens. Browser storage is still used for cart, favorites, and theme preference. Customer delivery addresses, named labels, map coordinates, recipient/contact details, and delivery instructions are stored in the database and managed through the address book.
