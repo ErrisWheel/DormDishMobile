@@ -369,6 +369,7 @@ app.post('/api/auth/register', registerCustomer);
 app.post('/auth/register', registerCustomer);
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
     res.json({ user: req.user });
 });
 
@@ -477,7 +478,14 @@ app.get('/api/auth/verify', (req, res) => {
         return res.status(410).json({ error: 'This verification link has expired. Sign in and request a new one.' });
     }
     db.prepare('UPDATE users SET email_verified = 1,email_verification_token_hash = NULL,email_verification_expires_at = NULL WHERE id = ?').run(user.id);
-    return res.json({ success: true, message: `Email ${user.email} verified successfully.` });
+    const verifiedUser = db.prepare('SELECT id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at FROM users WHERE id = ?').get(user.id);
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+        success: true,
+        emailVerified: Boolean(Number(verifiedUser?.email_verified)),
+        user: verifiedUser,
+        message: `Email ${user.email} verified successfully. Your account status is now updated.`
+    });
 });
 
 // Support mail

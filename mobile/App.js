@@ -23,7 +23,7 @@ function getOrigin(value) {
 
 function normalizeWebsiteUrl(value) {
   const origin = getOrigin(value);
-  // Expo URL
+  // Expo must load the frontend host, never the API host or a stale deep link.
   if (!origin || origin === API_ORIGIN) return DEFAULT_WEBSITE_URL;
   return `${origin}/`;
 }
@@ -45,7 +45,10 @@ const TEXT = '#24251f';
 const MUTED = '#85877f';
 const ACCENT = '#e84335';
 
-// API bridge
+// Runs within the remote page. API fetches are delegated to React Native's
+// network stack so a WebView-specific browser CORS/preflight failure cannot
+// prevent the app from reaching its own API. Requests are restricted to the
+// single known HTTPS API origin and /api/ path.
 const INJECTED_APP_SCRIPT = String.raw`
 (function () {
   try {
@@ -149,7 +152,7 @@ const INJECTED_APP_SCRIPT = String.raw`
       });
     };
   } catch (error) {
-    // Injection fallback
+    // Never stop the hosted website from rendering if an injection feature fails.
   }
   return true;
 })();
@@ -159,6 +162,7 @@ true;
 export default function App() {
   const webview = useRef(null);
   const recovered404Url = useRef('');
+  const loadedFirstPage = useRef(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [canGoBack, setCanGoBack] = useState(false);
@@ -166,6 +170,7 @@ export default function App() {
 
   const retry = useCallback(() => {
     recovered404Url.current = '';
+    loadedFirstPage.current = false;
     setLoadError('');
     setLoading(true);
     setReloadKey((value) => value + 1);
@@ -215,7 +220,7 @@ export default function App() {
     const targetPath = getPathname(targetUrl);
     const responsePayload = { id: message.id };
 
-    // Request guard
+    // Never allow the WebView bridge to become an arbitrary native HTTP proxy.
     if (getOrigin(targetUrl) !== API_ORIGIN || !targetPath.startsWith('/api/') ||
         !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method)) {
       responsePayload.status = 403;
@@ -232,7 +237,9 @@ export default function App() {
         const requestInit = { method, headers: safeHeaders };
         if (message.body != null && !['GET', 'HEAD'].includes(method)) requestInit.body = String(message.body);
 
-        // Route fallback
+        // Some deployed API builds expose routes at /auth/* while newer builds
+        // expose them at /api/auth/*. Retry only a framework-level HTML 404;
+        // never retry a normal JSON 404 from a matched application route.
         const isRouteHtml404 = (status, contentType, body) => {
           if (Number(status) !== 404) return false;
           const type = String(contentType || '').toLowerCase();
@@ -305,10 +312,11 @@ export default function App() {
       originWhitelist={['http://*', 'https://*']}
       javaScriptEnabled
       domStorageEnabled
-      geolocationEnabled
       sharedCookiesEnabled
       thirdPartyCookiesEnabled
       allowsBackForwardNavigationGestures
+      pullToRefreshEnabled={Platform.OS === 'ios'}
+      refreshControlLightMode={false}
       setSupportMultipleWindows={false}
       setBuiltInZoomControls={false}
       setDisplayZoomControls={false}
@@ -322,8 +330,15 @@ export default function App() {
       onShouldStartLoadWithRequest={shouldStartLoad}
       onOpenWindow={openExternalWindow}
       onNavigationStateChange={(state) => setCanGoBack(Boolean(state.canGoBack))}
-      onLoadStart={() => { setLoading(true); setLoadError(''); }}
-      onLoadEnd={() => setLoading(false)}
+      onLoadStart={() => {
+        setLoadError('');
+        // Keep the current screen visible while the native pull-to-refresh runs.
+        if (!loadedFirstPage.current) setLoading(true);
+      }}
+      onLoadEnd={() => {
+        loadedFirstPage.current = true;
+        setLoading(false);
+      }}
       onError={(event) => {
         setLoading(false);
         const description = event?.nativeEvent?.description;

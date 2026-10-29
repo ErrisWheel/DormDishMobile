@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bike, Heart, Home, LogOut, Moon, Package, Settings2, ShoppingCart, Store, Sun, Utensils, UserRound, Users, Star, ListOrdered, CircleHelp, MailCheck } from 'lucide-react';
+import { Bike, Heart, Home, LogOut, Moon, Package, Settings2, ShoppingCart, Store, Sun, Utensils, UserRound, Users, Star, ListOrdered, CircleHelp, MailCheck, BadgeCheck } from 'lucide-react';
 import { apiRequest, clearSession, getToken, money, saveSession, roleLabel } from './lib/api.js';
 import { LoginPage } from './components/LoginPage.jsx';
 import { SignupPage } from './components/SignupPage.jsx';
@@ -95,6 +95,26 @@ function App() {
     const [groupBusy, setGroupBusy] = useState(false);
 
     const notify = useCallback((message) => setToast(message), []);
+
+    const refreshAuthenticatedUser = useCallback(async (verifiedUser = null) => {
+        const token = getToken();
+        if (!token) return null;
+        try {
+            const result = await apiRequest('/auth/me');
+            const latestUser = result?.user;
+            if (!latestUser) return null;
+            if (verifiedUser?.email && String(latestUser.email).toLowerCase() !== String(verifiedUser.email).toLowerCase()) return null;
+            saveSession(token, latestUser);
+            setUser((current) => {
+                if (current && String(current.id) !== String(latestUser.id)) return current;
+                return latestUser;
+            });
+            return latestUser;
+        } catch {
+            return null;
+        }
+    }, []);
+
     const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
     useEffect(() => {
@@ -145,6 +165,25 @@ function App() {
             active = false;
         };
     }, []);
+
+    // Keep verification and account details in sync when the email link is opened outside the app.
+    useEffect(() => {
+        if (!user?.id || !getToken()) return undefined;
+        let active = true;
+        const syncAccount = async () => {
+            if (!active || document.visibilityState === 'hidden') return;
+            await refreshAuthenticatedUser();
+        };
+        window.addEventListener('focus', syncAccount);
+        document.addEventListener('visibilitychange', syncAccount);
+        const interval = setInterval(syncAccount, 30000);
+        return () => {
+            active = false;
+            window.removeEventListener('focus', syncAccount);
+            document.removeEventListener('visibilitychange', syncAccount);
+            clearInterval(interval);
+        };
+    }, [user?.id, refreshAuthenticatedUser]);
 
     const refreshCustomerData = useCallback(async (silent = false) => {
         if (!user || user.role !== 'customer') return;
@@ -580,8 +619,23 @@ function App() {
         }
     }
 
+    async function finishVerification(verifiedUser = null) {
+        window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        setVerificationToken('');
+        if (!getToken()) {
+            setUser(null);
+            setPage('customer-home');
+            setCheckingSession(false);
+            return;
+        }
+        setCheckingSession(true);
+        const latestUser = await refreshAuthenticatedUser(verifiedUser);
+        if (latestUser) setPage(getHomePage(latestUser.role));
+        setCheckingSession(false);
+    }
+
     if (verificationToken) {
-        return <div className={`app-shell ${dark ? 'dark' : ''}`}><VerificationPage token={verificationToken} onDone={() => { window.history.replaceState({}, '', window.location.pathname); setVerificationToken(''); if (getToken()) { setCheckingSession(true); apiRequest('/auth/me').then((result) => { setUser(result.user); setPage(getHomePage(result.user.role)); }).catch(() => clearSession()).finally(() => setCheckingSession(false)); } }} /></div>;
+        return <div className={`app-shell ${dark ? 'dark' : ''}`}><VerificationPage token={verificationToken} onVerified={refreshAuthenticatedUser} onDone={finishVerification} /></div>;
     }
 
     if (checkingSession) {
@@ -608,7 +662,7 @@ function App() {
                 </button>
                 <div className="top-actions">
                     <span className="role-chip">{roleLabel(user.role)}</span>
-                    {!Number(user.email_verified) && <button className="secondary-button small-button verify-email-topbar" onClick={() => navigate('verify-account')}><MailCheck size={14} /> Verify email</button>}
+                    {Number(user.email_verified) ? <span className="email-verified-topbar" title="Your email is verified"><BadgeCheck size={14} /> Verified</span> : <button className="secondary-button small-button verify-email-topbar" onClick={() => navigate('verify-account')}><MailCheck size={14} /> Verify email</button>}
                     <button className="icon-button" onClick={() => navigate('support')} aria-label="Contact support" title="Contact support"><CircleHelp size={18} /></button>
                     {isCustomer && <button className="header-cart-button" onClick={() => navigate('customer-cart')}><ShoppingCart size={18} /><span>Cart</span>{cartCount > 0 && <b>{cartCount}</b>}</button>}
                     <button className="icon-button theme-toggle" onClick={() => setDark((current) => !current)} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>{dark ? <Sun size={19} /> : <Moon size={19} />}</button>
@@ -680,7 +734,7 @@ function App() {
                         </div>}
                         {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={updateCheckoutAddress} addresses={savedAddresses} onRefreshAddresses={refreshSavedAddresses} onUseAddress={(saved) => { selectSavedAddress(saved.id); notify(`${saved.address_label} selected for checkout.`); }} onSave={saveProfile} onVerify={() => navigate('verify-account')} orders={orders} favorites={favorites} />}
                         {!isCustomer && page === 'account-profile' && <AccountProfilePage user={user} onSave={saveProfile} onVerify={() => navigate('verify-account')} />}
-                        {page === 'verify-account' && <VerificationPage user={user} onBack={() => navigate(getHomePage(user.role))} />}
+                        {page === 'verify-account' && <VerificationPage user={user} onVerified={refreshAuthenticatedUser} onBack={() => navigate(getHomePage(user.role))} />}
                         {page === 'support' && <SupportPage user={user} onBack={() => navigate(getHomePage(user.role))} />}
                         {isManager && page.startsWith('manager-') && <ManagerDashboard key={user.id} user={user} page={page} onToast={notify} />}
                         {isAdmin && page.startsWith('admin-') && <AdminDashboard key={user.id} page={page} onToast={notify} />}

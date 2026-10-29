@@ -451,7 +451,10 @@ const registerCustomer = run(async (req,res) => {
 });
 app.post('/api/auth/register', registerCustomer);
 app.post('/auth/register', registerCustomer);
-app.get('/api/auth/me', auth, run(async (req,res) => res.json({ user: req.user })));
+app.get('/api/auth/me', auth, run(async (req,res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ user: req.user });
+}));
 app.patch('/api/auth/profile', auth, run(async (req,res) => {
   const name = typeof req.body.name === 'string' ? req.body.name.trim() : req.user.name;
   const profileImageUrl = Object.hasOwn(req.body, 'profileImageUrl') ? String(req.body.profileImageUrl || '').trim() : req.user.profile_image_url || '';
@@ -523,8 +526,16 @@ app.get('/api/auth/verify', run(async (req,res) => {
     await query('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL WHERE id=$1', [user.id]);
     return res.status(400).json({ error: 'This verification link expired. Sign in and request a new one.' });
   }
-  await query('UPDATE users SET email_verified=1,email_verification_token_hash=NULL,email_verification_expires_at=NULL WHERE id=$1', [user.id]);
-  res.json({ success: true, message: `Email verified for ${user.email}. You can return to DormDish.` });
+  const verifiedUser = await one(`UPDATE users SET email_verified=1,email_verification_token_hash=NULL,email_verification_expires_at=NULL
+    WHERE id=$1
+    RETURNING id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at`, [user.id]);
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    success: true,
+    emailVerified: Boolean(Number(verifiedUser?.email_verified)),
+    user: verifiedUser,
+    message: `Email verified for ${user.email}. Your account status is now updated.`
+  });
 }));
 // Support mail
 function escapeMailHtml(value) {
