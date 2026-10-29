@@ -1196,3 +1196,60 @@ a {
 
 /* Navbar */
 .email-verified-topbar{display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid #b8e3c5;border-radius:999px;background:#edf8f0;color:#176b45;font-size:12px;font-weight:800;white-space:nowrap;flex-shrink:0}.app-shell.dark .email-verified-topbar{background:#20392a;border-color:#335b3f;color:#a8e0b5}@media(max-width:850px){.topbar{position:sticky!important;top:0;z-index:100}}
+
+
+/* Mobile width and verification layout */
+html, body, #root { width: 100%; max-width: 100%; }
+html, body { overflow-x: hidden; }
+.app-shell { width: 100%; max-width: 100%; overflow-x: clip; }
+.topbar, .layout, .main-content, .page-transition, .page-stack,
+.profile-content-grid, .dashboard-panel, .profile-identity-card,
+.dashboard-section-heading, .verification-shell, .verification-card,
+.auth-shell, .auth-card { min-width: 0; max-width: 100%; }
+.layout { grid-template-columns: 220px minmax(0, 1fr); }
+.main-content, .page-transition, .page-stack { overflow-wrap: anywhere; }
+img, video, iframe { max-width: 100%; }
+.verification-shell { width: 100%; padding: clamp(12px, 4vw, 24px); }
+.verification-card { width: min(100%, 520px); margin-inline: auto; overflow-wrap: anywhere; }
+.verification-card h1 { font-size: clamp(1.45rem, 5.6vw, 2rem); overflow-wrap: anywhere; }
+.verification-card p, .verification-success, .form-error { overflow-wrap: anywhere; word-break: normal; }
+.topbar .brand { min-width: 0; max-width: 60vw; }
+.topbar .brand > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.top-actions { min-width: 0; max-width: 55%; flex-wrap: wrap; justify-content: flex-end; }
+.profile-chip { min-width: 0; max-width: 100%; }
+.profile-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Account deletion */
+.delete-account-panel { display: grid; gap: 12px; border-color: color-mix(in srgb, #c83b36 30%, var(--line)); }
+.delete-account-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.delete-account-heading h2 { margin: 4px 0 0; color: var(--text); }
+.delete-account-icon { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 42px; border-radius: 12px; color: #b72f2f; background: rgba(190, 45, 45, .1); }
+.delete-account-panel > p { margin: 0; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.danger-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: fit-content; max-width: 100%; min-height: 42px; padding: 10px 14px; border: 1px solid #bb3434; border-radius: 10px; background: #bb3434; color: #fff; font-weight: 750; font-size: .9rem; line-height: 1.35; white-space: normal; }
+.danger-button:hover:not(:disabled) { background: #a92c2c; border-color: #a92c2c; }
+.delete-account-confirmation { display: grid; gap: 12px; min-width: 0; padding: 14px; border-radius: 12px; background: var(--bg); border: 1px solid color-mix(in srgb, #c83b36 25%, var(--line)); }
+.delete-account-warning { display: flex; align-items: flex-start; gap: 9px; color: #a52b2b; line-height: 1.5; }
+.delete-account-warning svg { flex: 0 0 auto; margin-top: 2px; }
+.delete-account-confirmation label { display: grid; gap: 7px; color: var(--text); font-size: .88rem; font-weight: 700; }
+.delete-account-confirmation input { width: 100%; min-width: 0; }
+.delete-account-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.app-shell.dark .delete-account-icon { color: #ffaaaa; background: rgba(190, 45, 45, .19); }
+.app-shell.dark .delete-account-warning { color: #ffaaaa; }
+@media (max-width: 850px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .layout, .main-content { width: 100%; }
+}
+@media (max-width: 580px) {
+  .topbar { gap: 8px; padding-inline: 10px; }
+  .topbar .brand { font-size: clamp(15px, 4vw, 18px); letter-spacing: -.4px; gap: 6px; }
+  .topbar .brand small { font-size: 9px; }
+  .top-actions { max-width: 58%; gap: 6px; }
+  .profile-chip { gap: 6px; padding-inline: 4px; }
+  .profile-chip-name { max-width: 86px; font-size: .78rem; }
+  .verification-shell { padding: 12px; }
+  .verification-card { padding: 20px 16px; border-radius: 16px; gap: 12px; }
+  .verification-card .primary-button, .verification-card .full-button { width: 100%; justify-content: center; white-space: normal; }
+  .delete-account-panel { padding: 14px; }
+  .delete-account-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .delete-account-actions button, .delete-account-panel > .danger-button { width: 100%; }
+}

@@ -3,9 +3,10 @@ import { BadgeCheck, Check, Heart, PackageCheck, ShieldCheck, UserRound, MailChe
 import { ImageUploadField } from '../../components/ImageUploadField.jsx';
 import { MediaImage } from '../../components/MediaImage.jsx';
 import { AddressBook } from '../../components/AddressBook.jsx';
+import { DeleteAccountPanel } from '../../components/DeleteAccountPanel.jsx';
 
 // Profile
-export function CustomerProfilePage({ user, address, onAddress, addresses = [], onRefreshAddresses, onUseAddress, onSave, onVerify, orders, favorites }) {
+export function CustomerProfilePage({ user, address, onAddress, addresses = [], onRefreshAddresses, onUseAddress, onSave, onVerify, onDeleteAccount, orders, favorites }) {
     const [name, setName] = useState(user.name);
     const [profileImageUrl, setProfileImageUrl] = useState(user.profile_image_url || '');
     const [saving, setSaving] = useState(false);
@@ -56,6 +57,7 @@ export function CustomerProfilePage({ user, address, onAddress, addresses = [], 
                 <div className="stat-card profile-stat-card"><span>Saved favorites</span><strong>{favorites.length}</strong><small><Heart size={14} /> Saved on this device</small></div>
                 <div className="stat-card profile-stat-card"><span>Saved addresses</span><strong className="profile-location-status">{addresses.length}</strong><small><PackageCheck size={14} /> Stored in your DormDish account</small></div>
             </div>
+            <DeleteAccountPanel onDeleteAccount={onDeleteAccount} />
         </div>
     );
 }

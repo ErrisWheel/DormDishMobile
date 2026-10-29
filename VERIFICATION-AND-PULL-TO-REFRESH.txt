@@ -1,0 +1,19 @@
+DormDish verification status + mobile pull-to-refresh patch
+
+Apply
+1. Extract this ZIP into E:\DormDishMobile, keeping the folder paths intact and overwriting the included files.
+2. Run `npm run build` and `npm test` from E:\DormDishMobile.
+3. Commit and push the updated server and website files so Render deploys the backend and Static Site.
+4. For Expo, run `cd E:\DormDishMobile\mobile` then `npx expo start --clear` and reload the app in Expo Go.
+
+What this changes
+- Verification API now returns the database-confirmed user and email_verified value after marking the token verified.
+- The verification page refuses to show success unless the server confirms the verified flag.
+- The signed-in app refreshes /auth/me when the WebView regains focus and every 30 seconds, so it picks up verification completed in Safari/mail.
+- The top bar shows a Verified badge after the account status refreshes.
+- Expo WebView enables the native iOS pull-to-refresh gesture. The initial full-screen loading overlay no longer covers the app when refreshing after the first page load. The website top bar is kept sticky on mobile.
+
+Important platform note
+`pullToRefreshEnabled` in react-native-webview is supported on iOS. Android requires a separate native refresh implementation; the iOS native spinner is the drag-responsive indicator.
+
+No .env file, tokens, API keys, or credentials are included. No Render environment variables should need to change for this patch.

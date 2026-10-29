@@ -1,17 +1,22 @@
-DormDish feature patch
+DormDish Mobile-width + account-deletion patch
 
-1. Extract the ZIP into E:\DormDishMobile and preserve paths / overwrite included files.
-2. From the project root, run: npm install
-3. Then run: npm run build; npm test
-4. Commit the updated package-lock.json produced by npm install if it changes. Do not commit .env, SMTP passwords, or email API keys.
-5. Follow FEATURES-DEPLOYMENT.md to provision demo accounts and configure Render/Neon. On Render Free, configure Resend HTTPS email instead of Gmail SMTP because outbound SMTP ports are blocked.
-6. In Render, the Web Service is https://dormdishmobile.onrender.com. The frontend Static Site uses https://dormdishmobile-static.onrender.com and VITE_API_URL=https://dormdishmobile.onrender.com/api.
+INSTALL
+1. Back up your current project folder.
+2. Extract this ZIP into the root of E:\DormDishMobile (the same folder that contains package.json).
+3. Allow the listed files to overwrite existing files and add the new src/components/DeleteAccountPanel.jsx file.
+4. Run `npm test` and `npm run build` locally.
+5. Commit and push the changed files to the GitHub branch Render deploys. Both the backend Web Service and frontend Static Site need the update.
 
-For Render Free, use Resend HTTPS API as documented rather than SMTP. If you upgrade Render and choose Gmail SMTP, revoke the previously exposed app password and generate a fresh one; keep it only in Render environment variables.
+CHANGES
+- Fixes phone-width overflow, including the email-verification page, narrow headers, and non-shrinking layouts. The page should no longer have a body-level horizontal slider at iPhone-sized widths.
+- Adds a Delete account section to the customer profile and non-customer account profile.
+- Requires a separate confirmation step and the user to type DELETE before the action is enabled.
+- Adds authenticated DELETE /api/auth/account and /auth/account endpoints for both PostgreSQL (Neon) and SQLite.
+- Invalidates the current session, removes saved addresses and profile media, removes saved group-order participation, redacts delivery addresses and order notes, anonymizes ratings/tracking attribution, and makes the account inactive with a random inaccessible password and replacement email.
+- Keeps historic order rows linked to an anonymized placeholder so store/order operations and historical records remain consistent. Active deliveries assigned to a deleting rider are returned to the pickup queue. A sole active superadmin is prevented from deleting their own account to avoid locking out the system.
+- Adds an API regression test for own-account deletion and old-session invalidation.
 
-GPS updates require location permission and the rider app to remain in the foreground. The rider confirms delivery with a camera proof photo. Photo bytes are stored in Neon BYTEA when DATABASE_URL is configured, or local SQLite BLOB in local development.
+No database migration is needed; this patch uses existing schema fields and tables.
 
-
-Recent UI fixes: superadmins can register stores and assign managers; store managers can no longer assign riders; riders can claim Ready for Pickup jobs from their own dashboard. Image URLs are normalized to the configured API host and failed previews use a visible fallback. Email delivery has an admin-only test button in Settings and supports Resend HTTPS API or SMTP on a host that permits it. Support messages route to SUPPORT_EMAIL; order statuses display as Order Received, Processed, In Kitchen, Ready for Pickup, On Delivery, and Delivered. Demo accounts remain seeded but are hidden from the login page.
-
-For Render Free, set EMAIL_PROVIDER=resend, RESEND_API_KEY, EMAIL_FROM using a verified sending domain, SUPPORT_EMAIL, PUBLIC_WEB_URL, and PUBLIC_API_URL on the DormDishMobile Web Service. See FEATURES-DEPLOYMENT.md for exact values. Public signup creates customers only and saves their first address in the database; customers can manage multiple named addresses and delivery instructions.
+VALIDATION NOTE
+Source syntax checks passed for frontend JSX/JavaScript, backend JavaScript, tests, and CSS. The full build/test commands could not run in this packaging environment because the extracted node_modules tree is missing platform-specific optional binaries and the dotenv package. Run them in the existing local project install before deploying.

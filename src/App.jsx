@@ -619,6 +619,30 @@ function App() {
         }
     }
 
+    async function deleteAccount() {
+        const result = await apiRequest('/auth/account', { method: 'DELETE' });
+        if (result?.success !== true) throw new Error(result?.error || 'The account could not be deleted.');
+        clearSession();
+        setUser(null);
+        setPage('customer-home');
+        setSelectedStore(null);
+        setStoreProducts([]);
+        setOrders([]);
+        setGroupOrder(null);
+        setCart([]);
+        setFavorites([]);
+        setAddress('');
+        setSavedAddresses([]);
+        setSelectedAddressId('');
+        setDeliveryInstructions('');
+        setOrderNotes('');
+        localStorage.removeItem('dormdish-address');
+        localStorage.removeItem('dormdish-order-notes');
+        localStorage.removeItem('dormdish-cart');
+        localStorage.removeItem('dormdish-favorites');
+        return true;
+    }
+
     async function finishVerification(verifiedUser = null) {
         window.history.replaceState({}, '', window.location.pathname + window.location.hash);
         setVerificationToken('');
@@ -732,8 +756,8 @@ function App() {
                                 <div className="dashboard-empty"><Heart size={28} /><h3>No favorites yet</h3><p>Open a store menu and save your favorite products from there.</p><button className="primary-button" onClick={() => navigate('customer-home')}>Browse stores</button></div>
                             )}
                         </div>}
-                        {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={updateCheckoutAddress} addresses={savedAddresses} onRefreshAddresses={refreshSavedAddresses} onUseAddress={(saved) => { selectSavedAddress(saved.id); notify(`${saved.address_label} selected for checkout.`); }} onSave={saveProfile} onVerify={() => navigate('verify-account')} orders={orders} favorites={favorites} />}
-                        {!isCustomer && page === 'account-profile' && <AccountProfilePage user={user} onSave={saveProfile} onVerify={() => navigate('verify-account')} />}
+                        {isCustomer && page === 'customer-profile' && <CustomerProfilePage user={user} address={address} onAddress={updateCheckoutAddress} addresses={savedAddresses} onRefreshAddresses={refreshSavedAddresses} onUseAddress={(saved) => { selectSavedAddress(saved.id); notify(`${saved.address_label} selected for checkout.`); }} onSave={saveProfile} onVerify={() => navigate('verify-account')} onDeleteAccount={deleteAccount} orders={orders} favorites={favorites} />}
+                        {!isCustomer && page === 'account-profile' && <AccountProfilePage user={user} onSave={saveProfile} onVerify={() => navigate('verify-account')} onDeleteAccount={deleteAccount} />}
                         {page === 'verify-account' && <VerificationPage user={user} onVerified={refreshAuthenticatedUser} onBack={() => navigate(getHomePage(user.role))} />}
                         {page === 'support' && <SupportPage user={user} onBack={() => navigate(getHomePage(user.role))} />}
                         {isManager && page.startsWith('manager-') && <ManagerDashboard key={user.id} user={user} page={page} onToast={notify} />}

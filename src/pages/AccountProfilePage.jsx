@@ -3,9 +3,10 @@ import { BadgeCheck, Check, MailCheck, ShieldCheck, UserRound } from 'lucide-rea
 import { roleLabel } from '../lib/api.js';
 import { ImageUploadField } from '../components/ImageUploadField.jsx';
 import { MediaImage } from '../components/MediaImage.jsx';
+import { DeleteAccountPanel } from '../components/DeleteAccountPanel.jsx';
 
 // Profile
-export function AccountProfilePage({ user, onSave, onVerify }) {
+export function AccountProfilePage({ user, onSave, onVerify, onDeleteAccount }) {
     const [name, setName] = useState(user.name || '');
     const [profileImageUrl, setProfileImageUrl] = useState(user.profile_image_url || '');
     const [saving, setSaving] = useState(false);
@@ -58,6 +59,7 @@ export function AccountProfilePage({ user, onSave, onVerify }) {
                     <button className="primary-button" type="button" onClick={onVerify}><MailCheck size={16} /> {Number(user.email_verified) ? 'View verification status' : 'Verify my account'}</button>
                 </section>
             </div>
+            <DeleteAccountPanel onDeleteAccount={onDeleteAccount} />
         </div>
     );
 }

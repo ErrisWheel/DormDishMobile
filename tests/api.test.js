@@ -365,3 +365,38 @@ test('public signup creates a customer with a saved delivery address', async () 
     }, created.body.token);
     assert.equal(forbiddenStaffCreation.status, 403);
 });
+
+
+test('a customer can delete their own account and the old token is invalidated', async () => {
+    const email = `delete-account-${Date.now()}@example.test`;
+    const created = await request('/auth/register', {
+        method: 'POST',
+        body: {
+            name: 'Delete Me Customer',
+            email,
+            password: 'DeleteTest123!',
+            contactNumber: '09123456789',
+            recipientName: 'Delete Me Customer',
+            addressLabel: 'Dorm',
+            addressText: 'Dormitory Building B, Room 12'
+        }
+    });
+    assert.equal(created.status, 201);
+    assert.ok(created.body.token);
+
+    const noAuth = await request('/auth/account', { method: 'DELETE' });
+    assert.equal(noAuth.status, 401);
+
+    const deleted = await request('/auth/account', { method: 'DELETE' }, created.body.token);
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.success, true);
+
+    const oldSession = await request('/auth/me', {}, created.body.token);
+    assert.equal(oldSession.status, 401);
+
+    const loginAgain = await request('/auth/login', {
+        method: 'POST',
+        body: { email, password: 'DeleteTest123!' }
+    });
+    assert.equal(loginAgain.status, 401);
+});

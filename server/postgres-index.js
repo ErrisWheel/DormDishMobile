@@ -60,10 +60,16 @@ const smtpPass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
 const smtpPort = Number(process.env.SMTP_PORT || 465);
 const smtpSecure = process.env.SMTP_SECURE === undefined ? smtpPort === 465 : String(process.env.SMTP_SECURE).toLowerCase() !== 'false';
 const resendApiKey = String(process.env.RESEND_API_KEY || '').trim();
+const gmailClientId = String(process.env.GMAIL_CLIENT_ID || '').trim();
+const gmailClientSecret = String(process.env.GMAIL_CLIENT_SECRET || '').trim();
+const gmailRefreshToken = String(process.env.GMAIL_REFRESH_TOKEN || '').trim();
+const gmailUser = String(process.env.GMAIL_USER || 'dormdishdelivery@gmail.com').trim();
 const emailProvider = String(process.env.EMAIL_PROVIDER || (resendApiKey ? 'resend' : 'smtp')).trim().toLowerCase();
 const emailFrom = String(emailProvider === 'resend'
     ? (process.env.EMAIL_FROM || process.env.RESEND_FROM || '')
-    : (process.env.EMAIL_FROM || process.env.SMTP_FROM || (smtpUser ? `DormDish Delivery <${smtpUser}>` : ''))).trim();
+    : emailProvider === 'gmail-api'
+        ? (process.env.EMAIL_FROM || `DormDish Delivery <${gmailUser}>`)
+        : (process.env.EMAIL_FROM || process.env.SMTP_FROM || (smtpUser ? `DormDish Delivery <${smtpUser}>` : ''))).trim();
 const mailer = smtpUser && smtpPass ? nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: smtpPort,
@@ -78,13 +84,98 @@ const supportEmail = String(process.env.SUPPORT_EMAIL || 'dormdishdelivery@gmail
 const smtpTestTo = String(process.env.SMTP_TEST_TO || supportEmail || smtpUser).trim();
 function emailConfigured() {
     if (emailProvider === 'resend') return Boolean(resendApiKey && emailFrom);
-    return Boolean(mailer);
+    if (emailProvider === 'gmail-api') return Boolean(gmailClientId && gmailClientSecret && gmailRefreshToken && gmailUser && emailFrom);
+    if (emailProvider === 'smtp') return Boolean(mailer);
+    return false;
+}
+function cleanEmailHeader(value) { return String(value || '').replace(/[\r\n]+/g, ' ').trim(); }
+function encodeMimeHeader(value) {
+    const clean = cleanEmailHeader(value);
+    return /^[\x20-\x7E]*$/.test(clean) ? clean : `=?UTF-8?B?${Buffer.from(clean, 'utf8').toString('base64')}?=`;
+}
+function wrapBase64(value) { return String(value || '').match(/.{1,76}/g)?.join('\r\n') || ''; }
+function emailErrorDetail(error) {
+    return String(error?.providerMessage || error?.message || 'Unknown email provider error').replace(/[\r\n]+/g, ' ').slice(0, 500);
+}
+function emailFailureMessage(error) {
+    const status = Number(error?.responseCode || error?.statusCode || 0);
+    const detail = emailErrorDetail(error);
+    if (emailProvider === 'resend' && (status === 403 || /only send testing emails|domain.{0,30}not verified|not verified.{0,30}domain/i.test(detail))) {
+        return `Resend refused this sender or recipient (HTTP ${status || 403}). If EMAIL_FROM is onboarding@resend.dev, Resend only allows mail to the email address that owns your Resend account. To verify arbitrary customers, use a verified domain in Resend or configure EMAIL_PROVIDER=gmail-api with Google OAuth. Provider detail: ${detail}`;
+    }
+    if (emailProvider === 'resend' && status === 401) return `Resend rejected RESEND_API_KEY (HTTP 401). Recreate the key in Resend and update the Render environment variable. Provider detail: ${detail}`;
+    if (emailProvider === 'gmail-api' && (status === 401 || status === 403)) return `Gmail API authorization failed. Check GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, and that Gmail API scope https://www.googleapis.com/auth/gmail.send was granted to ${gmailUser}. Provider detail: ${detail}`;
+    if (!emailConfigured()) return `Email provider ${emailProvider} is not configured. ${emailProvider === 'gmail-api' ? 'Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, GMAIL_USER, and EMAIL_FROM.' : emailProvider === 'resend' ? 'Set RESEND_API_KEY and EMAIL_FROM.' : 'Set SMTP_USER and SMTP_PASS.'}`;
+    return `${emailProvider.toUpperCase()} email request failed${status ? ` (HTTP ${status})` : ''}: ${detail}`;
+}
+async function getGmailAccessToken() {
+    if (!gmailClientId || !gmailClientSecret || !gmailRefreshToken || !gmailUser) {
+        const error = new Error('Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, and GMAIL_USER.');
+        error.code = 'GMAIL_API_NOT_CONFIGURED';
+        throw error;
+    }
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: gmailClientId, client_secret: gmailClientSecret, refresh_token: gmailRefreshToken, grant_type: 'refresh_token' }),
+        signal: AbortSignal.timeout(15000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.access_token) {
+        const detail = result.error_description || result.error || `Google OAuth returned HTTP ${response.status}.`;
+        const error = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+        error.code = 'GMAIL_OAUTH_ERROR';
+        error.responseCode = response.status;
+        error.providerMessage = error.message;
+        throw error;
+    }
+    return result.access_token;
+}
+async function sendWithGmailApi(message) {
+    const accessToken = await getGmailAccessToken();
+    const safeFrom = cleanEmailHeader(message.from || emailFrom);
+    const toValues = (Array.isArray(message.to) ? message.to : [message.to]).map(cleanEmailHeader).filter(Boolean);
+    if (!toValues.length) throw new Error('Gmail API email requires at least one recipient.');
+    const headers = [
+        `From: ${safeFrom}`,
+        `To: ${toValues.join(', ')}`,
+        `Subject: ${encodeMimeHeader(message.subject || 'DormDish notification')}`
+    ];
+    const replyTo = cleanEmailHeader(message.replyTo || message.reply_to || '');
+    if (replyTo) headers.push(`Reply-To: ${replyTo}`);
+    const textContent = String(message.text || '');
+    let mime;
+    if (message.html) {
+        const boundary = `dormdish_${crypto.randomBytes(12).toString('hex')}`;
+        mime = `${headers.join('\r\n')}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"${boundary}\"\r\n\r\n` +
+            `--${boundary}\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrapBase64(Buffer.from(textContent, 'utf8').toString('base64'))}\r\n` +
+            `--${boundary}\r\nContent-Type: text/html; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrapBase64(Buffer.from(String(message.html), 'utf8').toString('base64'))}\r\n` +
+            `--${boundary}--`;
+    } else {
+        mime = `${headers.join('\r\n')}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrapBase64(Buffer.from(textContent, 'utf8').toString('base64'))}`;
+    }
+    const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw: Buffer.from(mime, 'utf8').toString('base64url') }),
+        signal: AbortSignal.timeout(15000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const detail = result?.error?.message || result?.error_description || `Gmail API returned HTTP ${response.status}.`;
+        const error = new Error(String(detail));
+        error.code = 'GMAIL_API_ERROR';
+        error.responseCode = response.status;
+        error.providerMessage = error.message;
+        throw error;
+    }
+    return result;
 }
 async function sendEmail(message) {
     if (!emailConfigured()) {
-        throw new Error(emailProvider === 'resend'
-            ? 'Email delivery is not configured. Set RESEND_API_KEY and EMAIL_FROM.'
-            : 'SMTP is not configured. Set SMTP_USER and SMTP_PASS.');
+        const error = new Error(emailFailureMessage(new Error('Provider credentials are missing.')));
+        error.code = 'EMAIL_NOT_CONFIGURED';
+        throw error;
     }
     if (emailProvider === 'resend') {
         const payload = {
@@ -103,18 +194,26 @@ async function sendEmail(message) {
         });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const error = new Error(result.message || result.error || `Email provider returned HTTP ${response.status}.`);
+            const detail = result.message || (typeof result.error === 'string' ? result.error : result.error?.message) || result.name || `Email provider returned HTTP ${response.status}.`;
+            const error = new Error(String(detail));
             error.code = 'RESEND_API_ERROR';
             error.responseCode = response.status;
+            error.statusCode = response.status;
+            error.providerMessage = String(detail);
+            error.providerName = result.name || result.type || result.error?.name || '';
             error.command = 'HTTPS';
             throw error;
         }
         return result;
     }
-    return mailer.sendMail({ ...message, from: message.from || emailFrom });
+    if (emailProvider === 'gmail-api') return sendWithGmailApi(message);
+    if (emailProvider === 'smtp') return mailer.sendMail({ ...message, from: message.from || emailFrom });
+    const error = new Error(`Unsupported EMAIL_PROVIDER value: ${emailProvider}. Use resend, gmail-api, or smtp.`);
+    error.code = 'EMAIL_PROVIDER_UNSUPPORTED';
+    throw error;
 }
 async function verifyEmailTransport() {
-    if (!emailConfigured()) throw new Error(emailProvider === 'resend' ? 'Set RESEND_API_KEY and EMAIL_FROM.' : 'Set SMTP_USER and SMTP_PASS.');
+    if (!emailConfigured()) throw new Error(emailFailureMessage(new Error('Provider credentials are missing.')));
     if (emailProvider === 'smtp') await mailer.verify();
 }
 function normalizePublicApiUrl(value = '') {
@@ -135,7 +234,7 @@ function getPublicApiUrl(req) { return publicApiUrl || normalizePublicApiUrl(`${
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function emailVerificationConfigured() { return Boolean(emailConfigured() && publicWebUrl); }
 async function sendVerificationMessage(user, rawToken) {
-  if (!emailVerificationConfigured()) throw new Error('Email verification is not configured. Set RESEND_API_KEY and EMAIL_FROM (recommended on Render Free), or SMTP_USER and SMTP_PASS on a host that permits SMTP.');
+  if (!emailVerificationConfigured()) throw new Error(emailFailureMessage(new Error('Provider credentials are missing.')) + ' PUBLIC_WEB_URL must also be set.');
   const link = `${publicWebUrl}/?verify=${encodeURIComponent(rawToken)}`;
   await sendEmail({
     from: emailFrom,
@@ -371,7 +470,7 @@ async function requireManagerOrder(req,res,order) {
 
 // Health
 // Auth
-const API_BUILD = 'dormdish-signup-addressbook-resend-https-2026-10-29';
+const API_BUILD = 'dormdish-email-resend-diagnostics-gmail-api-2026-10-29';
 app.get('/api/health', run(async (_req,res) => {
   await query('SELECT 1');
   res.json({
@@ -381,8 +480,8 @@ app.get('/api/health', run(async (_req,res) => {
     build: API_BUILD,
     loginRoutes: ['POST /api/auth/login', 'POST /auth/login'],
         signupRoutes: ['POST /api/auth/register', 'POST /auth/register'],
-    features: ['demo-account-seeding','email-verification','email-provider-resend-api','customer-signup','saved-customer-addresses','address-map-picker','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment','support-email','email-delivery-test','staff-account-creation','order-status-labels'],
-    emailVerification: { configured: emailVerificationConfigured(), emailProvider, emailConfigured: emailConfigured(), smtpConfigured: Boolean(mailer), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
+    features: ['demo-account-seeding','email-verification','email-provider-resend-api','email-provider-gmail-api','customer-signup','saved-customer-addresses','address-map-picker','image-upload','rider-live-gps','rider-delivery-proof','rider-pickup-claims','store-manager-assignment','support-email','email-delivery-test','staff-account-creation','order-status-labels','account-self-deletion'],
+    emailVerification: { configured: emailVerificationConfigured(), emailProvider, emailConfigured: emailConfigured(), smtpConfigured: Boolean(mailer), gmailApiConfigured: Boolean(gmailClientId && gmailClientSecret && gmailRefreshToken && gmailUser), resendConfigured: Boolean(resendApiKey && emailFrom), publicWebUrlConfigured: Boolean(publicWebUrl), smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com', smtpPort },
     supportEmail: { configured: Boolean(emailConfigured() && supportEmail), destination: supportEmail },
     timestamp: nowIso()
   });
@@ -443,8 +542,8 @@ const registerCustomer = run(async (req,res) => {
     try { await sendVerificationMessage(user,rawToken); verificationEmailSent=true; verificationMessage=`Verification email sent to ${user.email}.`; }
     catch(error) {
       await query('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL,email_verification_sent_at=NULL WHERE id=$1',[user.id]);
-      console.error('Signup verification email failed:',{provider:emailProvider,code:error.code||'',responseCode:error.responseCode||'',command:error.command||'',message:error.message||'Unknown email error'});
-      verificationMessage=`Account created, but verification email could not be sent (${error.code||'EMAIL_ERROR'}). You can request another link from your profile after email delivery is configured.`;
+      console.error('Signup verification email failed:',{provider:emailProvider,code:error.code||'',responseCode:error.responseCode||'',command:error.command||'',message:emailErrorDetail(error)});
+      verificationMessage=`Account created, but verification email could not be sent. ${emailFailureMessage(error)}`;
     }
   }
   res.status(201).json({token:tokenFor(user),user,verificationEmailSent,verificationMessage});
@@ -463,6 +562,67 @@ app.patch('/api/auth/profile', auth, run(async (req,res) => {
   const user = await one('UPDATE users SET name=$1,profile_image_url=$2 WHERE id=$3 RETURNING id,name,email,role,store_id,is_active,is_online,profile_image_url,email_verified,created_at', [name,profileImageUrl,req.user.id]);
   res.json({ user });
 }));
+
+const deleteAccountHandler = run(async (req, res) => {
+  const client = await pool.connect();
+  let transactionOpen = false;
+  try {
+    await client.query('BEGIN');
+    transactionOpen = true;
+    const current = await one('SELECT id,role FROM users WHERE id=$1 FOR UPDATE', [req.user.id], client);
+    if (!current) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
+      return res.status(404).json({ error: 'Account not found.' });
+    }
+    if (current.role === 'superadmin') {
+      const count = await one("SELECT COUNT(*)::int AS count FROM users WHERE role='superadmin' AND is_active=1", [], client);
+      if (Number(count?.count || 0) <= 1) {
+        await client.query('ROLLBACK');
+        transactionOpen = false;
+        return res.status(409).json({ error: 'The only active administrator cannot delete this account. Create another active administrator first.' });
+      }
+    }
+
+    const userId = current.id;
+    const now = nowIso();
+    const proofMedia = await many('SELECT media_id FROM delivery_proofs WHERE rider_id=$1', [userId], client);
+
+    await query('DELETE FROM customer_addresses WHERE customer_id=$1', [userId], client);
+    await query('DELETE FROM group_order_members WHERE customer_id=$1', [userId], client);
+    await query('DELETE FROM group_order_items WHERE customer_id=$1', [userId], client);
+    await query("UPDATE group_orders SET delivery_address='Deleted account',status=CASE WHEN status='OPEN' THEN 'CANCELLED' ELSE status END,updated_at=$1 WHERE host_customer_id=$2", [now, userId], client);
+    await query('UPDATE order_items SET ordered_by_customer_id=NULL WHERE ordered_by_customer_id=$1', [userId], client);
+    await query('UPDATE tracking_updates SET updated_by=NULL WHERE updated_by=$1', [userId], client);
+    await query("UPDATE ratings SET customer_id=NULL,reviewer_name='Deleted customer' WHERE customer_id=$1", [userId], client);
+    await query("UPDATE orders SET delivery_address='Deleted account',order_notes='',updated_at=$1 WHERE customer_id=$2", [now, userId], client);
+    await query("UPDATE orders SET rider_id=NULL,status=CASE WHEN status='Out for Delivery' THEN 'Ready for Pickup' ELSE status END,updated_at=$1 WHERE rider_id=$2", [now, userId], client);
+    await query('DELETE FROM rider_locations WHERE rider_id=$1', [userId], client);
+    await query('DELETE FROM delivery_proofs WHERE rider_id=$1', [userId], client);
+    for (const proof of proofMedia) {
+      await query("DELETE FROM uploaded_media WHERE id=$1 AND uploaded_by=$2 AND purpose='delivery-proof'", [proof.media_id, userId], client);
+    }
+    await query("DELETE FROM uploaded_media WHERE uploaded_by=$1 AND purpose='profile'", [userId], client);
+    await query("UPDATE uploaded_media SET uploaded_by=NULL WHERE uploaded_by=$1 AND purpose IN ('product','store')", [userId], client);
+
+    const randomPassword = crypto.randomBytes(48).toString('hex');
+    const anonymizedEmail = `deleted+${userId}.${crypto.randomBytes(10).toString('hex')}@deleted.dormdish.invalid`;
+    await query(`UPDATE users SET name='Deleted account',email=$1,password_hash=$2,store_id=NULL,is_active=0,is_online=0,profile_image_url='',email_verified=0,email_verification_token_hash=NULL,email_verification_expires_at=NULL,email_verification_sent_at=NULL WHERE id=$3`, [anonymizedEmail, await bcrypt.hash(randomPassword, 10), userId], client);
+
+    await client.query('COMMIT');
+    transactionOpen = false;
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, message: 'Your account was deleted and you have been signed out.' });
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+app.delete('/api/auth/account', auth, deleteAccountHandler);
+app.delete('/auth/account', auth, deleteAccountHandler);
+
 
 // Customer address book
 function parseAddressPayload(body, fallback = {}) {
@@ -502,7 +662,7 @@ app.post('/api/auth/verification/send', auth, run(async (req,res) => {
   const user = await one('SELECT id,name,email,email_verified,email_verification_sent_at FROM users WHERE id=$1', [req.user.id]);
   if (!user) return res.status(404).json({ error: 'Account not found.' });
   if (Number(user.email_verified)) return res.json({ success: true, alreadyVerified: true, message: 'Your email is already verified.' });
-  if (!emailVerificationConfigured()) return res.status(503).json({ error: 'Email verification is not configured. Set RESEND_API_KEY and EMAIL_FROM (recommended on Render Free), or SMTP_USER and SMTP_PASS on a host that permits SMTP.' });
+  if (!emailVerificationConfigured()) return res.status(503).json({ error: emailFailureMessage(new Error('Provider credentials are missing.')) + ' PUBLIC_WEB_URL must also be set.' });
   if (user.email_verification_sent_at && Date.now() - Date.parse(user.email_verification_sent_at) < 60000) return res.status(429).json({ error: 'Wait one minute before requesting another verification email.' });
   const rawToken = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -510,9 +670,8 @@ app.post('/api/auth/verification/send', auth, run(async (req,res) => {
   try { await sendVerificationMessage(user, rawToken); }
   catch (error) {
     await query('UPDATE users SET email_verification_token_hash=NULL,email_verification_expires_at=NULL,email_verification_sent_at=NULL WHERE id=$1', [user.id]);
-    console.error('Could not send verification email:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
-    const diagnostic = error.code || (error.responseCode ? `EMAIL_${error.responseCode}` : 'EMAIL_ERROR');
-    return res.status(502).json({ error: `Could not send the verification email (${diagnostic}). Check the email provider configuration and Render logs.` });
+    console.error('Could not send verification email:', { provider: emailProvider, code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: emailErrorDetail(error) });
+    return res.status(502).json({ error: emailFailureMessage(error), code: error.code || 'EMAIL_ERROR', provider: emailProvider, providerStatus: error.responseCode || null });
   }
   res.json({ success: true, message: `Verification email sent to ${user.email}.` });
 }));
@@ -550,7 +709,7 @@ app.post('/api/support', run(async (req, res) => {
   if (contactNumber.length < 5 || contactNumber.length > 30) return res.status(400).json({ error: 'Enter a valid contact number.' });
   if (!validEmail(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
   if (message.length < 10 || message.length > 4000) return res.status(400).json({ error: 'Your message must contain 10–4000 characters.' });
-  if (!emailConfigured()) return res.status(503).json({ error: emailProvider === 'resend' ? 'Email is unavailable. Configure RESEND_API_KEY and EMAIL_FROM on the backend.' : 'Email is unavailable because SMTP_USER or SMTP_PASS is missing.' });
+  if (!emailConfigured()) return res.status(503).json({ error: emailFailureMessage(new Error('Provider credentials are missing.')) });
   if (!supportEmail || !validEmail(supportEmail)) return res.status(503).json({ error: 'SUPPORT_EMAIL must contain a valid email address.' });
   const safeName = escapeMailHtml(name);
   const safeEmail = escapeMailHtml(email);
@@ -567,15 +726,14 @@ app.post('/api/support', run(async (req, res) => {
     });
     return res.status(202).json({ success: true, message: 'Your message was sent to DormDish Support. We can reply to the email you provided.' });
   } catch (error) {
-    const diagnostic = error.code || (error.responseCode ? `EMAIL_${error.responseCode}` : 'EMAIL_ERROR');
-    console.error('Could not send support message:', { code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: error.message || 'Unknown SMTP error' });
-    return res.status(502).json({ error: `Could not send your message (${diagnostic}). Check the configured email provider and Render logs.` });
+    console.error('Could not send support message:', { provider: emailProvider, code: error.code || '', responseCode: error.responseCode || '', command: error.command || '', message: emailErrorDetail(error) });
+    return res.status(502).json({ error: emailFailureMessage(error), code: error.code || 'EMAIL_ERROR', provider: emailProvider, providerStatus: error.responseCode || null });
   }
 }));
 
 // Email test
 app.post('/api/admin/smtp-test', auth, role('superadmin'), run(async (req, res) => {
-  if (!emailConfigured()) return res.status(503).json({ error: emailProvider === 'resend' ? 'Set RESEND_API_KEY and EMAIL_FROM on the backend.' : 'Set SMTP_USER and SMTP_PASS on the backend, or configure Resend HTTPS API.' });
+  if (!emailConfigured()) return res.status(503).json({ error: emailFailureMessage(new Error('Provider credentials are missing.')) });
   if (!validEmail(smtpTestTo)) return res.status(503).json({ error: 'SMTP_TEST_TO or SUPPORT_EMAIL must be a valid email address.' });
   try {
     await verifyEmailTransport();
