@@ -34,14 +34,14 @@ For verification emails, support messages, and the admin email test, **use Resen
 ```text
 EMAIL_PROVIDER=resend
 RESEND_API_KEY=<your Resend API key>
-EMAIL_FROM=DormDish Delivery <no-reply@your-verified-domain>
+EMAIL_FROM=DormDish Delivery <onboarding@resend.dev>
 SUPPORT_EMAIL=dormdishdelivery@gmail.com
-SMTP_TEST_TO=dormdishdelivery@gmail.com
+SMTP_TEST_TO=<the email address used for your Resend account>
 ```
 
-In Resend, add and verify a domain you control, then use a sender address on that verified domain in `EMAIL_FROM`. `SUPPORT_EMAIL` is the inbox that receives support requests; it can remain `dormdishdelivery@gmail.com`. Resend does not let you send production mail as an arbitrary `@gmail.com` address unless that sender/domain has been verified, and you cannot verify the `gmail.com` domain yourself. The sender displayed to recipients will therefore be the verified domain address, with the DormDish name.
+If you do not own a domain yet, use `EMAIL_FROM=DormDish Delivery <onboarding@resend.dev>` and set `SMTP_TEST_TO` to the exact email address used for your Resend account. This works for testing only: Resend restricts its shared onboarding sender to the owner email, so verification emails cannot be delivered to arbitrary new customers and support messages will only work if `SUPPORT_EMAIL` is that same address. For production signup verification, verify a domain you control in Resend and use a sender on that domain. You cannot verify the `gmail.com` domain yourself or send production mail as an arbitrary `@gmail.com` sender.
 
-If you do not own a domain yet, Resend's onboarding sender can only be used within its test restrictions; it is not a complete production solution for sending verification links to arbitrary new customers. The alternative is upgrading the Render Web Service to a plan that permits outbound SMTP and setting `EMAIL_PROVIDER=smtp` with a fresh Gmail App Password:
+If you need to send as `dormdishdelivery@gmail.com` without owning a domain, the alternatives are to upgrade the Render Web Service to a plan that permits outbound SMTP and set `EMAIL_PROVIDER=smtp` with a fresh Gmail App Password, or add Gmail API OAuth support (which uses HTTPS but requires Google Cloud OAuth credentials). For the SMTP option:
 
 ```text
 EMAIL_PROVIDER=smtp

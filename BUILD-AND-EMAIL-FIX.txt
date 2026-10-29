@@ -1,0 +1,24 @@
+DormDish build and Resend test fix
+
+1. Extract this ZIP into E:\DormDishMobile, keeping folders and overwriting included files.
+2. This patch restores src/pages/customer/GroupOrderPanel.jsx, which CustomerCartPage.jsx imports but was absent from the previous ZIP. Render's Linux build is case-sensitive; keep the file name and path exactly as shown.
+3. Run locally:
+   cd E:\DormDishMobile
+   npm run build
+   npm test
+4. Commit and push the missing component and updated instructions:
+   git add src/pages/customer/GroupOrderPanel.jsx .env.example FEATURES-DEPLOYMENT.md INSTALL-THIS-PATCH.txt README.md
+   git commit -m "Restore group order panel and clarify Resend test sender"
+   git push
+5. No domain yet? In the DormDishMobile Web Service on Render, set:
+   EMAIL_PROVIDER=resend
+   RESEND_API_KEY=<your existing Resend key>
+   EMAIL_FROM=DormDish Delivery <onboarding@resend.dev>
+   SMTP_TEST_TO=<the email address used for your Resend account>
+   PUBLIC_WEB_URL=https://dormdishmobile-static.onrender.com
+   PUBLIC_API_URL=https://dormdishmobile.onrender.com/api
+   CORS_ORIGIN=https://dormdishmobile-static.onrender.com
+
+Important: onboarding@resend.dev is test-only. Resend only allows this sender to send to the email address associated with your Resend account. If SUPPORT_EMAIL is dormdishdelivery@gmail.com, test-mode support email only works if that is also your Resend account email. Arbitrary sign-up verification and support recipients require a verified domain in Resend, or a different provider.
+
+Deploy the backend and static site after pushing. The static site runs `npm install && npm run build` and publishes `dist`.

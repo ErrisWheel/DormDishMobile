@@ -17,7 +17,7 @@ DormDish Signup + Email Provider + Saved Address Patch
    PUBLIC_API_URL=https://dormdishmobile.onrender.com/api
    CORS_ORIGIN=https://dormdishmobile-static.onrender.com
    DATABASE_URL=<existing Neon connection string>
-5. Add and verify a domain you control in Resend before using EMAIL_FROM for real customer recipients. SUPPORT_EMAIL is the receiving inbox and can stay dormdishdelivery@gmail.com. Do not use an @gmail.com sender with Resend unless that domain is genuinely yours/verified.
+5. No custom domain yet? Use EMAIL_FROM=DormDish Delivery <onboarding@resend.dev> for testing and set SMTP_TEST_TO to the email address used for your Resend account. Resend restricts this test sender to that recipient. The production verification flow cannot send to arbitrary new customers until you verify a domain you control in Resend. SUPPORT_EMAIL can stay dormdishdelivery@gmail.com only if that address is also the Resend account email while using the test sender; otherwise the test-mode restriction blocks it. Do not use an @gmail.com sender with Resend as if you own the gmail.com domain.
 6. Keep Static Site VITE_API_URL=https://dormdishmobile.onrender.com/api and redeploy it after pushing.
 7. Do not include .env, API keys, or passwords in commits or the ZIP.
 
